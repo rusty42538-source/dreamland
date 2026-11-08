@@ -376,6 +376,22 @@ function buildMap(state) {
     w.add(at(roof, 0, 2.15, 0));
     place(w, 4.0, -2.5, 1.3);
   }
+  // лечебница (больница): строится по закону государства; до тех пор лекарь лечит жителей на дому
+  let CLINIC = null;
+  if (B.has('clinic')) {
+    const c = new THREE.Group();
+    c.add(at(mesh(new THREE.BoxGeometry(4.2, 1.9, 3.0), '#efe6d2'), 0, 0.95, 0));
+    const sh = new THREE.Shape(); sh.moveTo(-2.3, 0); sh.lineTo(2.3, 0); sh.lineTo(0, 1.3); sh.closePath();
+    const roof = mesh(new THREE.ExtrudeGeometry(sh, { depth: 4.6, bevelEnabled: false }), '#b5352a'); roof.geometry.translate(0, 0, -2.3); roof.rotation.y = Math.PI / 2; c.add(at(roof, 0, 1.9, 0));
+    c.add(at(mesh(new THREE.BoxGeometry(0.9, 1.4, 0.1), '#6b4a2b'), 0, 0.7, 1.53));
+    for (const sx of [-1.4, 1.4]) c.add(at(mesh(new THREE.BoxGeometry(0.7, 0.6, 0.1), '#9fd0e8'), sx, 1.1, 1.53));
+    for (const sx of [-1.1, 1.1]) c.add(at(mesh(new THREE.BoxGeometry(0.14, 1.9, 0.14), '#a87a48'), sx, 0.95, 2.2));
+    c.add(at(mesh(new THREE.BoxGeometry(2.7, 0.1, 1.0), '#c9a06a'), 0, 1.95, 2.0));
+    c.add(at(mesh(new THREE.BoxGeometry(0.9, 0.25, 0.08), '#d24a3a'), 0, 2.9, 1.5)); c.add(at(mesh(new THREE.BoxGeometry(0.25, 0.9, 0.08), '#d24a3a'), 0, 2.9, 1.5));   // красный крест
+    let best = null, bd = 1e9;
+    for (let x = -18; x <= 6; x += 1.5) for (let z = -10; z <= 14; z += 1.5) { if (!free(x, z, 3.6)) continue; const d = Math.hypot(x - CAMP.x, z - CAMP.y); if (d > 8.5 && d < bd) { bd = d; best = [x, z]; } }
+    if (best) { c.rotation.y = Math.atan2(CAMP.x - best[0], CAMP.y - best[1]); place(c, best[0], best[1], 3.1); CLINIC = { x: best[0], z: best[1] }; }
+  }
   // поля
   if (B.has('fields')) {
     for (let k = 0; k < 2; k++) {
@@ -543,7 +559,7 @@ function buildMap(state) {
       for (let i = 0; i < p.count; i++) { const x = b[i * 3]; p.setZ(i, Math.sin(x * 2.2 - time * 5) * 0.15 * (x / 2.4)); } p.needsUpdate = true; flagMesh.geometry.computeVertexNormals(); }
     if (snow) { const p = snow.geometry.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, ((p.getY(i) - 0.02 + 30) % 30)); p.needsUpdate = true; }
   };
-  window.WORLD = { scene, renderer, sun, hemi, fireLight, effects, huts: HUTS, groundH, CAMP, THREE, people, person, CHARS, riverX, pen, blocked, rr: () => rand() };
+  window.WORLD = { scene, renderer, sun, hemi, fireLight, effects, huts: HUTS, clinic: CLINIC, groundH, CAMP, THREE, people, person, CHARS, riverX, pen, blocked, rr: () => rand() };
   window.renderAt = (t, intro = false, custom = null) => {
     const k = intro ? 1 - Math.pow(1 - Math.min(1, t * 1.15), 3) : 1;
     camera.position.lerpVectors(P0, P1, k); look.lerpVectors(L0, L1, k);

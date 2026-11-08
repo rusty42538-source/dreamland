@@ -36,7 +36,7 @@ const EPOCHS = [
   [3000, 'Город', 'купцы, банк, газета, театр, торговля с соседями'],
   [10000, 'Страна', 'второй город, дороги, выборы президента'],
 ];
-const BUILD = { storage: 'Склад', well: 'Колодец', palisade: 'Частокол', fields: 'Поля', pen: 'Загон' };
+const BUILD = { storage: 'Склад', well: 'Колодец', palisade: 'Частокол', fields: 'Поля', pen: 'Загон', clinic: 'Лечебница' };
 const LAW_TYPES = [
   ['Построить склад', 'построить общий склад для зерна', { food: 10, money: -10 }, 'Защищает от голода зимой'],
   ['Выкопать колодец', 'выкопать колодец у реки', { health: 10, money: -5, happy: 5 }, ''],
@@ -167,14 +167,18 @@ function buildPins() {
     { pos: P(4.2, 6.5, 2.2), icon: ICONS.cow, text: `Коровы Гриши · ${D.world.cows ?? 5}`, info: () => charInfo('grisha') },
   ];
   const BP = { storage: [-7.5, -3, 4.2], well: [4, -2.5, 3.4], palisade: [-12, 1, 3], fields: [0, -11, 1.8], pen: [4.2, 9.2, 1.6] };
+  if (world.clinic) BP.clinic = [world.clinic.x, world.clinic.z, 4.2];
   for (const b of D.world.buildings || []) {
     if (!BP[b]) continue; const l = lawFor(b);
     list.push({ pos: P(BP[b][0], BP[b][1], BP[b][2]), law: l?.num, text: BUILD[b] + (l?.author ? ' · ' + l.author : ''), info: () => `<h2>${BUILD[b]}</h2>` + (l ? `<div class="sub">Построен по закону №${l.num}</div><div class="box"><div class="hint">«${esc(l.text)}»</div><div class="sub" style="margin-top:6px">Автор: ${esc(l.author || '—')}${l.likes ? ' · ' + l.likes + ' ❤' : ''}</div>${chips(l.effects)}</div>` : '<div class="box hint">Построен решением Думы.</div>') });
   }
   for (const h of sim?.houses() || []) list.push({ pos: P(h.x, h.z, h.p >= 1 ? 4.2 : 2.6), icon: ICONS.sign, text: h.p >= 1 ? `Дом ${h.owner}` : `Стройка: дом ${h.owner} · ${Math.round(h.p * 100)}%`,
     info: () => `<h2>${h.p >= 1 ? 'Дом ' + esc(h.owner) : 'Стройка дома ' + esc(h.owner)}</h2><div class="sub">${h.p >= 1 ? 'Сруб из брёвен, которые заготовили лесорубы' : 'Строят двое плотников вместе с будущим хозяином'}</div><div class="box hint">${h.p >= 1 ? 'Хозяин переехал сюда из общего шалаша. Следующий дом в очереди уже строится.' : `Готово на ${Math.round(h.p * 100)}%. Каждый дом — 16 брёвен: лесорубы рубят дерево, несут брёвна на стройку, плотники ставят венец за венцом.`}</div>` });
-  for (const b of sim?.biz() || []) if (b.x != null) list.push({ pos: P(b.x, b.z, 2.6), icon: ICONS.sign, text: `${b.shop} · ${b.owner}`,
-    info: () => `<h2>${esc(b.shop)}</h2><div class="sub">${esc(b.title)} — ${esc(b.owner)}</div><div class="box hint">Своё дело открыто на ${b.day + 1}-й день государства: ${esc(b.why)}. Хозяин вложил 50 монет, а теперь зарабатывает на покупателях: жители тратят здесь часть своих денег. Чем опытнее хозяин, тем лучше товар и тем больше покупают.</div>` });
+  for (const b of sim?.biz() || []) if (b.x != null) list.push({ pos: P(b.x, b.z, b.state === 'open' ? 3.4 : 2.8), icon: ICONS.sign,
+    text: b.state === 'open' ? `${b.shop} · ${b.owner}` : `Стройка: ${b.shop.toLowerCase()} · ${Math.round(b.p * 100)}%`,
+    info: () => b.state === 'open'
+      ? `<h2>${esc(b.shop)}</h2><div class="sub">${esc(b.title)} — ${esc(b.owner)}</div><div class="box hint">Здание построено хозяином из ${b.mats} ${plural(b.mats, 'бревна', 'брёвен', 'брёвен')}, купленных у лесорубов за ${b.paid} монет. Дело открылось на ${b.ready + 1}-й день государства: ${esc(b.why)}. Теперь хозяин зарабатывает на покупателях: жители тратят здесь часть своих денег. Чем опытнее хозяин, тем лучше товар и тем больше покупают.</div>`
+      : `<h2>Стройка: ${esc(b.shop.toLowerCase())}</h2><div class="sub">${esc(b.owner)} строит ${esc(b.what)}</div><div class="box hint">Чтобы открыть новое дело, нужно построить здание. ${esc(b.owner)} купил ${b.mats} ${plural(b.mats, 'бревно', 'бревна', 'брёвен')} у лесорубов за ${b.paid} монет и строит сам, поэтому пока не работает и не получает зарплату. Готово на ${Math.round(b.p * 100)}%; ${esc(b.why)}.</div>` });
   $('pins').innerHTML = '';
   pins = list.map(p => { const el = document.createElement('button'); el.className = 'pin' + (p.law ? ' pinlaw' : ''); el.innerHTML = `<b>${p.law ? p.law : p.icon}</b>${esc(p.text)}`;
     el.onclick = () => showInfo(p.info()); $('pins').appendChild(el); return { ...p, el }; });
@@ -368,7 +372,7 @@ function devHtml() {
   const s = sim?.stats(); if (!s?.eco) return '…'; const e = s.eco;
   const busy = (s.hutOcc || []).reduce((x, v) => x + v, 0);
   return `<div class="hint">⛺ Шалашей: <b>${s.huts}</b> · по ${s.hutCap} мест · живут <b>${busy}</b> из ${s.huts * s.hutCap}<br>🪵 Заготовлено брёвен: <b>${e.logs}</b><br>🏠 Построено своих домов: <b>${e.done}</b>${s.building ? `<br>🔨 Сейчас строится дом ${esc(s.building.owner)} — <b>${Math.round(s.building.p * 100)}%</b>` : ''}${e.tax ? `<br>🏛 Государственный запас (закон №1): <b>${e.reserve.logs}</b> брёвен, <b>${e.reserve.fish}</b> рыбы${e.tax < 0.1 ? ' — собрана лишь малая часть: жители прячут добычу' : ''}` : ''}<br>🐟 Поймано рыбы: <b>${e.fish}</b><br>🌾 Собрано урожаев: <b>${e.harvests}</b></div>
-    ${s.life ? `<div class="hint" style="margin-top:8px">💰 Казна: <b>${e.treasury}</b> монет${e.tax ? ' (налог 10% с заработка + плата за места в шалашах)' : ' (плата за места в шалашах)'}<br>${s.life.biz ? `🧰 Своё дело открыли: <b>${s.life.biz}</b> ${plural(s.life.biz, 'предприниматель', 'предпринимателя', 'предпринимателей')} — ${(sim.biz() || []).map(b => esc(b.shop.toLowerCase()) + ' (' + esc(b.owner) + ')').join(', ')}<br>` : '🧰 Своё дело пока никто не открыл: ждут спроса и копят 50 монет<br>'}🎖 Мастеров и выше: <b>${s.life.masters}</b> — чем их больше, тем быстрее растут запасы и казна<br>${s.life.best ? `🏆 Самый опытный: ${esc(s.life.best.who)} — ${esc(s.life.best.title)}<br>` : ''}🧑‍🌾 Без работы: <b>${s.life.jobless}</b>${s.life.hiredToday ? ` · сегодня устроились на работу: <b>${s.life.hiredToday}</b>` : ''}<br>🍞 Средний кошелёк: <b>${s.life.avgCoins}</b> монет${s.life.hungry ? ` · не хватило на хлеб: <b>${s.life.hungry}</b>` : ''}</div>` : ''}
+    ${s.life ? `<div class="hint" style="margin-top:8px">💰 Казна: <b>${e.treasury}</b> монет${e.tax ? ' (налог 10% с заработка + плата за места в шалашах)' : ' (плата за места в шалашах)'}<br>${s.life.biz ? `${s.life.building ? `🔨 Строят своё здание: <b>${s.life.building}</b> (брёвна куплены за свои деньги, ушло ${e.shopLogs} брёвен)<br>` : ''}🧰 Своё дело открыли: <b>${s.life.biz}</b> ${plural(s.life.biz, 'предприниматель', 'предпринимателя', 'предпринимателей')} — ${(sim.biz() || []).map(b => esc(b.shop.toLowerCase()) + ' (' + esc(b.owner) + ')').join(', ')}<br>` : '🧰 Своё дело пока никто не открыл: ждут спроса и копят на брёвна для здания<br>'}🩺 Болеют сегодня: <b>${s.life.sick}</b>, лекарь вылечила: <b>${s.life.healed}</b> — ${s.life.clinic ? 'принимает в лечебнице (до 20 в день)' : 'ходит по домам (до 5 в день), лечебницу должно построить государство'}<br>🎖 Мастеров и выше: <b>${s.life.masters}</b> — чем их больше, тем быстрее растут запасы и казна<br>${s.life.best ? `🏆 Самый опытный: ${esc(s.life.best.who)} — ${esc(s.life.best.title)}<br>` : ''}🧑‍🌾 Без работы: <b>${s.life.jobless}</b>${s.life.hiredToday ? ` · сегодня устроились на работу: <b>${s.life.hiredToday}</b>` : ''}<br>🍞 Средний кошелёк: <b>${s.life.avgCoins}</b> монет${s.life.hungry ? ` · не хватило на хлеб: <b>${s.life.hungry}</b>` : ''}</div>` : ''}
     <div class="hint" style="margin-top:8px">Каждый житель мечтает о своём доме. Дом — это 16 брёвен: двое лесорубов рубят лес, плотники и хозяин строят. Всё платно: хлеб и место в шалаше стоят монет, а монеты даёт только работа. С каждым рабочим днём жители набираются опыта: 10 уровней на каждой из 10 должностей — от новичка до владельца своего производства. Нажми на любого жителя на карте, чтобы узнать, о чём он думает.</div>`;
 }
 setInterval(() => { const el = document.getElementById('devBox'); if (el) el.innerHTML = devHtml(); }, 3000);
@@ -485,6 +489,9 @@ function liveText() {
   if (s.fish) parts.push(p(s.fish, 'рыбак у реки', 'рыбака у реки', 'рыбаков у реки'));
   if (s.farm) parts.push(p(s.farm, 'работает', 'работают', 'работают') + ` в поле (${s.harvestIn > 0 ? 'урожай через ' + s.harvestIn + ' ' + plural(s.harvestIn, 'день', 'дня', 'дней') : 'сегодня сбор урожая'})`);
   if (s.craft) parts.push(p(s.craft, 'предприниматель работает', 'предпринимателя работают', 'предпринимателей работают') + ' в своих мастерских');
+  if (s.shopbuild) parts.push(p(s.shopbuild, 'житель строит', 'жителя строят', 'жителей строят') + ' своё здание для нового дела');
+  if (s.heal) parts.push('Баба Нюра лечит больных');
+  if (s.sick) parts.push(p(s.sick, 'житель болеет', 'жителя болеют', 'жителей болеют'));
   if (s.life?.jobless && s.walk) parts.push(p(s.life.jobless, 'житель ищет', 'жителя ищут', 'жителей ищут') + ' работу');
   if (s.herd) parts.push('Гриша пасёт коров');
   if (s.cook) parts.push('Марфа печёт хлеб');

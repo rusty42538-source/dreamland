@@ -79,7 +79,19 @@ export const BIZ = {
   kvass: { name: 'квасовар', shop: 'Квасная', why: 'зерна в избытке — можно варить квас', when: t => t.grain >= 600, color: '#b5802a',
     ranks: L10('Начинающий квасовар', 'Квасовар', 'Мастер-квасовар', 'Хозяин квасной', 'Квасовар с работниками', 'Хозяин двух квасных', 'Пивовар', 'Главный пивовар', 'Хозяин пивоварни', 'Владелец пивоваренного завода') },
 };
-export const START_COST = 50;      // столько монет нужно, чтобы открыть своё дело (инструменты и материалы)
+// Чтобы открыть новое дело, нужно ПОСТРОИТЬ подходящее здание. Строит предприниматель из брёвен, которые покупает у лесорубов за свои деньги
+// (брёвна берутся из общего запаса — тот же, из которого строятся дома). Пока строит — не работает и не получает зарплату.
+export const LOG_PRICE = 6, RESERVE = 15;     // цена бревна, монет; сколько монет должно остаться на хлеб после покупки
+export const BUILD = {   // сколько брёвен и рабочих дней нужно на здание
+  potter: { logs: 4, days: 2, what: 'гончарную мастерскую с печью для обжига' }, tailor: { logs: 4, days: 2, what: 'швейную мастерскую с большими окнами' },
+  smith: { logs: 6, days: 3, what: 'кузницу с горном и наковальней' }, mill: { logs: 8, days: 3, what: 'мельницу с крыльями-парусами' },
+  smoke: { logs: 5, days: 2, what: 'коптильню с высокой трубой' }, joiner: { logs: 6, days: 2, what: 'столярную с навесом для досок' },
+  cobbler: { logs: 4, days: 2, what: 'сапожную мастерскую' }, trader: { logs: 6, days: 3, what: 'торговую лавку с прилавком' },
+  kvass: { logs: 5, days: 2, what: 'квасную с бочками' },
+};
+export const buildCost = key => BUILD[key].logs * LOG_PRICE;
+// Лекарь (Баба Нюра) здания не строит: ходит к больным и лечит дома. Государство может построить лечебницу — тогда лечит там и принимает больше людей.
+const P_SICK = 0.04, HEAL_FEE = 3, HEAL_CAP = 5, CLINIC_CAP = 20;
 const BUY = 0.4, BUY_FROM = 15;    // кто богаче 15 монет, тратит в среднем 0,4 монеты в день в каждой мастерской
 export const ladder = role => RANKS[role] || BIZ[role]?.ranks || null;
 export const titleOf = (role, L) => ladder(role) ? ladder(role)[L.rank] + (L.top ? '' : ` · ${L.lvl} ур.`) : 'Без работы';
@@ -97,27 +109,47 @@ export function logsUntil(day, hour) {
 }
 
 // spec: [{ i, role, join }] — role: стартовая работа ('walk' — без работы), join — день прихода в государство
-export function createLife(spec, tax, houseCost) {
-  const n = spec.length, full = [];             // full[d] — состояние после полного дня d
+export function createLife(spec, tax, houseCost, clinicFrom = Infinity) {
+  const n = spec.length;                        // история считается один раз и продвигается день за днём на месте (без копий всего журнала)
   const init = () => ({ role: spec.map(s => s.role), xp: new Float64Array(n), coins: Float64Array.from(spec, s => 20 + Math.round(hash(s.i + 51) * 20)),
     earned: new Float64Array(n), pay: new Float64Array(n), hungry: new Uint8Array(n), hiredDay: new Int32Array(n).fill(-1), paid: 0,
-    treasury: 0, logs: 0, fish: 0, grain: 0, houses: 0, hires: [], promos: [], biz: [], log: [] });
+    bk: new Uint8Array(n), sick: new Uint8Array(n), shopLogs: 0, sickToday: 0, healedToday: 0, treasury: 0, logs: 0, fish: 0, grain: 0, houses: 0, hires: [], promos: [], biz: [], log: [] });
   const clone = s => ({ ...s, role: s.role.slice(), xp: s.xp.slice(), coins: s.coins.slice(), earned: s.earned.slice(), pay: s.pay.slice(), hungry: s.hungry.slice(),
-    hiredDay: s.hiredDay.slice(), hires: s.hires.slice(), promos: s.promos.slice(), biz: s.biz.map(b => ({ ...b })), log: s.log.slice() });
+    hiredDay: s.hiredDay.slice(), bk: s.bk.slice(), sick: s.sick.slice(), hires: s.hires.slice(), promos: s.promos.slice(), biz: s.biz.map(b => ({ ...b })), log: [] });   // журнал копии — только новые события дня
   const free = r => r === 'walk' || r === 'farm' || r === 'fish';   // кто может уйти в своё дело (лесорубы, плотники и именные жители — на своих местах)
   // один день (или его часть до часа h)
   function step(s, d, h) {
     const f = workFracAt(h), meals = MEALS.filter(m => m <= h).length, rent = h >= 22 ? 1 : 0, payday = h >= PAYDAY;
     const cnt = { farm: 0, fish: 0 }; s.role.forEach(r => { if (r in cnt) cnt[r]++; });
     const logs0 = s.logs; let bread = 0; s.hungry.fill(0); s.pay.fill(0); s.paid = payday ? 1 : 0;
-    // утро: если появился спрос — самый богатый из простых работников открывает своё дело (не больше одного в день)
+    s.sick.fill(0);
     if (h >= MORNING) {
-      const t = { day: d, grain: s.grain, fish: s.fish, houses: Math.floor(s.logs * (1 - tax) / houseCost), workers: s.role.filter((r, k) => r !== 'walk' && d >= spec[k].join).length, savings: s.coins.reduce((a, b) => a + b, 0) };
-      const key = Object.keys(BIZ).find(b => !s.biz.some(x => x.key === b) && BIZ[b].when(t));
-      const score = k => s.coins[k] * (TRAITS[traitOf(spec[k].i)].bizFirst ? 2 : 1);   // мечтатели берутся за новое дело первыми
-      if (key) { let best = -1; for (let k = 0; k < n; k++) if (d >= spec[k].join && free(s.role[k]) && s.coins[k] >= START_COST && (best < 0 || score(k) > score(best))) best = k;
-        if (best >= 0) { s.biz.push({ key, k: best, d, was: s.role[best] }); s.role[best] = key; s.xp[best] = 0; s.coins[best] -= START_COST; s.log.push({ d, h: MORNING, t: 'biz', k: best, key }); } }
+      // 1) построенное здание готово — хозяин открывает дело
+      for (const b of s.biz) if (b.state === 'build' && d >= b.ready) { b.state = 'open'; s.role[b.k] = b.key; s.xp[b.k] = 0; s.bk[b.k] = 0; s.log.push({ d, h: MORNING, t: 'biz', k: b.k, key: b.key }); }
+      // 2) появился спрос — самый богатый из простых работников покупает брёвна и начинает стройку (одна стройка за раз)
+      if (s.biz.length < Object.keys(BIZ).length && !s.biz.some(b => b.state === 'build')) {   // все дела уже есть — спрос не проверяем
+        const t = { day: d, grain: s.grain, fish: s.fish, houses: s.houses, workers: s.role.filter((r, k) => r !== 'walk' && d >= spec[k].join).length, savings: s.coins.reduce((a, b) => a + b, 0) };
+        const stock = s.logs * (1 - tax) - s.shopLogs - s.houses * houseCost;     // свободные брёвна на складе (после домов и прошлых строек)
+        const score = k => s.coins[k] * (TRAITS[traitOf(spec[k].i)].bizFirst ? 2 : 1);   // мечтатели берутся за новое дело первыми
+        for (const key of Object.keys(BIZ)) {
+          if (s.biz.some(x => x.key === key) || !BIZ[key].when(t) || stock < BUILD[key].logs) continue;
+          const price = buildCost(key); let best = -1;
+          for (let k = 0; k < n; k++) if (d >= spec[k].join && free(s.role[k]) && !s.bk[k] && s.coins[k] >= price + RESERVE && (best < 0 || score(k) > score(best))) best = k;
+          if (best < 0) continue;
+          s.coins[best] -= price; s.shopLogs += BUILD[key].logs; s.bk[best] = 1;
+          const sellers = WOODCUTTERS.filter(i => i < n); sellers.forEach(i => { s.coins[i] += price / sellers.length; s.earned[i] += price / sellers.length; });   // деньги получают лесорубы
+          s.biz.push({ key, k: best, d, ready: d + BUILD[key].days, state: 'build', was: s.role[best], mats: BUILD[key].logs, paid: price, p: 0 });
+          s.log.push({ d, h: MORNING, t: 'mats', k: best, key, n: BUILD[key].logs, price }); break;
+        }
+      }
+      // 3) болезни: у кого-то случается простуда; лекарь успевает не ко всем (5 в день, с лечебницей — 20)
+      const hk = s.role.indexOf('herbal'), cap = hk < 0 ? 0 : d >= clinicFrom ? CLINIC_CAP : HEAL_CAP; let treated = 0, ill = 0;
+      for (let k = 0; k < n; k++) if (d >= spec[k].join && k !== hk && hash(k * 131 + d * 17 + 7) < P_SICK) {
+        ill++; if (treated < cap) { treated++; s.sick[k] = 2; const fee = Math.min(HEAL_FEE, s.coins[k]); s.coins[k] -= fee; s.coins[hk] += fee; s.earned[hk] += fee;
+          if (treated <= 2) s.log.push({ d, h: MORNING + 0.5 + treated, t: 'heal', k: hk, to: k, clinic: d >= clinicFrom }); } else s.sick[k] = 1; }
+      s.sickToday = ill; s.healedToday = treated;
     }
+    for (const b of s.biz) b.p = b.state === 'open' ? 1 : Math.min(0.99, ((d - b.d) + clamp((h - MORNING) / (24 - MORNING), 0, 1)) / BUILD[b.key].days);
     for (let k = 0; k < n; k++) {
       if (d < spec[k].join) continue;
       // утро: денег мало — идёт устраиваться на работу
@@ -125,18 +157,18 @@ export function createLife(spec, tax, houseCost) {
         const r = cnt.farm < CAP.farm ? 'farm' : cnt.fish < CAP.fish ? 'fish' : 'farm'; s.role[k] = r; cnt[r]++; s.hiredDay[k] = d; s.hires.push({ d, k, r }); s.log.push({ d, h: MORNING + (k % 7) * 0.05, t: 'hire', k, r });
       }
       for (let j = 0; j < meals; j++) if (s.coins[k] >= BREAD) { s.coins[k] -= BREAD; bread++; } else s.hungry[k] = 1;
-      const r = s.role[k];
+      const r = s.role[k], wk = s.bk[k] ? 0 : s.sick[k] === 1 ? 0 : s.sick[k] === 2 ? 0.5 : 1;   // стройка и болезнь отнимают рабочее время
       if (r !== 'walk') {
-        const L0 = levelOf(s.xp[k]), m = multOf(L0);
-        if (payday && WAGE[r]) { const pay = WAGE[r] * payMultOf(L0), t = pay * tax * (TRAITS[traitOf(spec[k].i)].taxK ?? 1); s.coins[k] += pay - t; s.earned[k] += pay - t; s.pay[k] = pay - t; s.treasury += t; }
-        const gain = talentOf(spec[k].i) * f * (s.hungry[k] ? 0.6 : 1), x0 = s.xp[k]; s.xp[k] += gain;
+        const L0 = levelOf(s.xp[k]), m = multOf(L0) * wk;
+        if (payday && WAGE[r] && wk) { const pay = WAGE[r] * payMultOf(L0) * wk, t = pay * tax * (TRAITS[traitOf(spec[k].i)].taxK ?? 1); s.coins[k] += pay - t; s.earned[k] += pay - t; s.pay[k] = pay - t; s.treasury += t; }
+        const gain = talentOf(spec[k].i) * f * wk * (s.hungry[k] ? 0.6 : 1), x0 = s.xp[k]; s.xp[k] += gain;
         const L1 = levelOf(s.xp[k]); if (L1.rank > L0.rank) { let lo = 0, hi = 1; for (let it = 0; it < 24; it++) { const mid = (lo + hi) / 2; if (levelOf(x0 + gain * mid).rank > L0.rank) hi = mid; else lo = mid; }
           s.promos.push({ d, k, rank: L1.rank }); s.log.push({ d, h: Math.round(hi * h * 100) / 100, t: 'promo', k, role: r, rank: L1.rank }); }   // опыт копится равномерно с 0:00 до h — значит, повышение было в hi·h часов
         if (r === 'wood') s.logs += 4 * m * f; else if (r === 'fish') s.fish += 4 * m * f; else if (r === 'farm') s.grain += 1.5 * m * f;
       }
     }
     // вечером жители покупают товары в мастерских — это и есть доход предпринимателей
-    if (payday && s.biz.length) for (const b of s.biz) {
+    if (payday && s.biz.length) for (const b of s.biz) { if (b.state !== 'open') continue;
       let sum = 0; const q = 1 + 0.1 * levelOf(s.xp[b.k]).rank;   // чем опытнее хозяин, тем лучше товар и тем больше покупают
       for (let k = 0; k < n; k++) if (k !== b.k && d >= spec[k].join && s.coins[k] >= BUY_FROM) { const x = BUY * q * (TRAITS[traitOf(spec[k].i)].buyK || 1); s.coins[k] -= x; sum += x; }
       const t = sum * tax; s.coins[b.k] += sum - t; s.earned[b.k] += sum - t; s.pay[b.k] = sum - t; s.treasury += t; b.sold = Math.round(sum / 2);
@@ -145,16 +177,18 @@ export function createLife(spec, tax, houseCost) {
     if (h >= 19.5) { const hungry = []; for (let k = 0; k < n; k++) if (s.hungry[k] && d >= spec[k].join) hungry.push(k);
       for (let k = 0; k < n && hungry.length; k++) if (TRAITS[traitOf(spec[k].i)].gift && d >= spec[k].join && s.coins[k] >= 40) { const to = hungry.shift(); s.coins[k] -= 6; s.coins[to] += 6; s.log.push({ d, h: 19.5, t: 'gift', k, to }); } }
     if (tax && payday && d % 4 === 2) for (let k = 0; k < n; k++) if (traitOf(spec[k].i) === 'sly' && s.role[k] !== 'walk' && d >= spec[k].join) { s.log.push({ d, h: PAYDAY, t: 'sly', k }); break; }
-    if ((d + 1) % 6 === 0 && h >= 12 && !s.log.some(e => e.d === d && e.t === 'harvest')) s.log.push({ d, h: 12, t: 'harvest', grain: Math.round(s.grain) });
-    { const nh = Math.floor(s.logs * (1 - tax) / houseCost); while (s.houses < nh) { s.houses++; const need = s.houses * houseCost / (1 - tax); s.log.push({ d, h: Math.round(h * clamp((need - logs0) / Math.max(1e-6, s.logs - logs0), 0, 1) * 100) / 100, t: 'house', n: s.houses }); } }
+    if ((d + 1) % 6 === 0 && h >= 12) s.log.push({ d, h: 12, t: 'harvest', grain: Math.round(s.grain) });
+    { const nh = Math.floor((s.logs * (1 - tax) - s.shopLogs) / houseCost); while (s.houses < nh) { s.houses++; const need = (s.houses * houseCost + s.shopLogs) / (1 - tax); s.log.push({ d, h: Math.round(h * clamp((need - logs0) / Math.max(1e-6, s.logs - logs0), 0, 1) * 100) / 100, t: 'house', n: s.houses }); } }
     if (rent) for (let k = 0; k < n; k++) if (d >= spec[k].join) { const b = Math.min(BED, s.coins[k]); s.coins[k] -= b; s.treasury += b; }
     const ck = s.role.indexOf('cook');   // хлеб покупают у пекаря: 10% цены — её доход сверх зарплаты (остальное — мука и дрова)
     if (ck >= 0 && payday) { s.coins[ck] += bread * BREAD * 0.1; s.earned[ck] += bread * BREAD * 0.1; s.pay[ck] += bread * BREAD * 0.1; }
   }
+  let chain = null, chainDay = 0;    // состояние на начало дня chainDay (все прошлые дни уже посчитаны)
   return function at(day, hour) {
     if (day < 0) return init();
-    while (full.length < day) { const s = clone(full.length ? full[full.length - 1] : init()); step(s, full.length, 24); full.push(s); }
-    const s = clone(day > 0 ? full[day - 1] : init()); step(s, day, hour); return s;
+    if (!chain || day < chainDay) { chain = init(); chainDay = 0; }
+    while (chainDay < day) { step(chain, chainDay, 24); chainDay++; }
+    const s = clone(chain); step(s, day, hour); s.log = chain.log.concat(s.log); return s;   // сегодняшний день считается на копии; журнал = прошлое + новое
   };
 }
 

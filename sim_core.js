@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { animal, bakeGroup } from './sim_animals.js';
-import { FOUND_DAY, workFracAt, createLife, logsUntil, levelOf, multOf, titleOf, talentOf, RANKS, PLACE, BREAD, MEALS, BIZ, ladder, wageOf, personName, PAYDAY, START_COST, TRAITS, traitOf } from './sim_life.js';
+import { FOUND_DAY, workFracAt, createLife, logsUntil, levelOf, multOf, titleOf, talentOf, RANKS, PLACE, BREAD, MEALS, BIZ, BUILD, buildCost, LOG_PRICE, ladder, wageOf, personName, PAYDAY, TRAITS, traitOf } from './sim_life.js';
 
 const MAX_SHOWN = 700;
 const LUNCH_FROM = 13, LUNCH_TO = 13.7;
@@ -209,20 +209,20 @@ export function createSim(world, D) {
     scene.add(g); return { x, z }; })();
   OBS.push({ x: pile.x, z: pile.z, r: 1.1 });
 
-  // ---------- ярмарочная площадь: места под мастерские предпринимателей (резервируются заранее) ----------
-  const STALL_GRID = [[0, 0], [3.2, 0], [-3.2, 0], [0, 3.2], [3.2, 3.2], [-3.2, 3.2], [0, -3.2], [3.2, -3.2], [-3.2, -3.2]];
+  // ---------- ярмарочная площадь: места под здания предпринимателей (резервируются заранее, по одному зданию на дело) ----------
+  const SHOP_GRID = [[0, 0], [5, 0], [-5, 0], [0, 5], [5, 5], [-5, 5], [0, -5], [5, -5], [-5, -5]];
   const market = (() => { let best = null;
-    for (let d = R * 0.55; d < R + 16 && !best; d += 0.7) for (let k = 0; k < 48; k++) { const a = k / 48 * 6.283, x = CAMP.x + Math.cos(a) * d, z = CAMP.y + Math.sin(a) * d * 0.9;
-      if (STALL_GRID.every(([ox, oz]) => okLand(x + ox - 1.5, z + oz) && freeOf(x + ox, z + oz, 1.6) && !inFarm(x + ox, z + oz, 2.5) && Math.hypot(x + ox - pile.x, z + oz - pile.z) > 3)) { best = { x, z }; break; } }
+    for (let d = R * 0.55; d < R + 18 && !best; d += 0.7) for (let k = 0; k < 48; k++) { const a = k / 48 * 6.283, x = CAMP.x + Math.cos(a) * d, z = CAMP.y + Math.sin(a) * d * 0.9;
+      if (SHOP_GRID.every(([ox, oz]) => okLand(x + ox - 2.4, z + oz) && freeOf(x + ox, z + oz, 2.1) && !inFarm(x + ox, z + oz, 3) && Math.hypot(x + ox - pile.x, z + oz - pile.z) > 3.5)) { best = { x, z }; break; } }
     return best || { x: CAMP.x - R * 0.8, z: CAMP.y + R * 0.6 }; })();
-  const stallSlots = STALL_GRID.map(([ox, oz]) => ({ x: market.x + ox, z: market.z + oz }));
+  const shopSlots = SHOP_GRID.map(([ox, oz]) => ({ x: market.x + ox, z: market.z + oz }));
 
   // ---------- участки под дома (заранее, по кругу за шалашами) ----------
   const plots = [];
   { const r = seeded(9001);
     for (let i = 0; i < 4000 && plots.length < 40; i++) {
       const a = r() * 6.283, d = 9 + Math.sqrt(r()) * (R + 4 - 9), x = CAMP.x + Math.cos(a) * d, z = CAMP.y + Math.sin(a) * d * 0.9;
-      if (!okLand(x - 2, z) || !freeOf(x, z, 2.4) || inFarm(x, z, 3.5) || plots.some(p => Math.hypot(p.x - x, p.z - z) < 4.6) || stallSlots.some(p => Math.hypot(p.x - x, p.z - z) < 4.2)) continue;
+      if (!okLand(x - 2, z) || !freeOf(x, z, 2.4) || inFarm(x, z, 3.5) || plots.some(p => Math.hypot(p.x - x, p.z - z) < 4.6) || shopSlots.some(p => Math.hypot(p.x - x, p.z - z) < 5.4)) continue;
       plots.push({ x, z, rot: Math.atan2(CAMP.x - x, CAMP.y - z) });
     }
     plots.sort((p, q) => Math.hypot(p.x - CAMP.x, p.z - CAMP.y) - Math.hypot(q.x - CAMP.x, q.z - CAMP.y)); }
@@ -270,12 +270,17 @@ export function createSim(world, D) {
   const hist = (D.popHistory || []).map(e => ({ d: Math.floor(Date.parse(e.date + 'T12:00:00Z') / 864e5) - FOUND_DAY, shown: Math.max(8, Math.round(e.pop * 0.5)) })).sort((p, q) => p.d - q.d);
   const joinOf = i => { if (!hist.length) return 0; const e = hist.find(x => x.shown > i); return e ? Math.max(0, e.d) : Math.max(0, today() - FOUND_DAY); };
   agents.forEach(a => { a.role0 = a.role; a.join = joinOf(a.i); a.talent = talentOf(a.i); a.trait = traitOf(a.i); a.traitName = TRAITS[a.trait][a.female ? 'f' : 'm']; a.workLen = Math.max(2, a.workLen + (TRAITS[a.trait].work || 0)); });
-  const life = createLife(agents.map(a => ({ i: a.i, role: a.role0, join: a.join })), TAX, HOUSE_COST);
+  // лечебница: её строит государство (закон «Лекарня»); до тех пор лекарь лечит жителей дома и здания не имеет
+  const clinic = world.clinic || null;
+  const clinicFrom = clinic ? (D.world?.clinicSince ? Math.floor(Date.parse(D.world.clinicSince + 'T00:00:00Z') / 864e5) - FOUND_DAY : 0) : Infinity;
+  const life = createLife(agents.map(a => ({ i: a.i, role: a.role0, join: a.join })), TAX, HOUSE_COST, clinicFrom);
+  let sickList = [];
   let lifeKey = '', lifeCur = null, rolesChanged = false, bizList = [];
   function lifeNow(day, hour) {
     const k = day + ':' + hour.toFixed(2); if (k === lifeKey) return lifeCur;
     lifeKey = k; lifeCur = life(day, hour);
-    agents.forEach((a, j) => { const r = lifeCur.role[j]; if (r !== a.role) { a.role = r; a.pk = ''; rolesChanged = true; } a.L = levelOf(lifeCur.xp[j]); a.mult = multOf(a.L); a.coins = lifeCur.coins[j]; a.hungry = !!lifeCur.hungry[j]; a.hiredDay = lifeCur.hiredDay[j]; a.pay = lifeCur.pay[j]; });
+    agents.forEach((a, j) => { const r = lifeCur.role[j]; if (r !== a.role) { a.role = r; a.pk = ''; rolesChanged = true; } a.L = levelOf(lifeCur.xp[j]); a.mult = multOf(a.L); a.coins = lifeCur.coins[j]; a.hungry = !!lifeCur.hungry[j]; a.hiredDay = lifeCur.hiredDay[j]; a.pay = lifeCur.pay[j]; a.bld = lifeCur.bk[j]; a.sick = lifeCur.sick[j]; });
+    sickList = agents.filter(a => a.sick);
     bizList = lifeCur.biz.map(b => ({ ...b, owner: agents[b.k] }));
     return lifeCur;
   }
@@ -291,7 +296,9 @@ export function createSim(world, D) {
     switch (e.t) {
       case 'hire': return `${who(a)} устроил${a.female ? 'ась' : 'ся'} на работу ${PLACE[e.r]}: монеты кончились, а хлеб платный`;
       case 'promo': return `${whoT(a)} получил${ending(a)} повышение — теперь ${ladder(e.role)[e.rank]}${firstPromo(e) ? ' — перв' + (a.female ? 'ая' : 'ый') + ' в государстве!' : ''}${a.trait === 'hard' ? '. Трудолюбие окупается!' : a.trait === 'lazy' ? '. Хоть и не спешил' + ending(a) + '…' : ''}`;
-      case 'biz': return `${a.trait === 'dreamer' ? whoT(a) : who(a)} открыл${ending(a)} своё дело — ${BIZ[e.key].shop.toLowerCase()}: ${BIZ[e.key].why}. Вложено ${START_COST} монет`;
+      case 'mats': return `${a.trait === 'dreamer' ? whoT(a) : who(a)} купил${ending(a)} ${e.n} ${plural(e.n, 'бревно', 'бревна', 'брёвен')} у лесорубов за ${coinsW(e.price)} и начал${ending(a)} строить ${BUILD[e.key].what}`;
+      case 'heal': { const b = agents[e.to]; return `Баба Нюра вылечила ${whom(b)}: заболел${b.female ? 'а' : ''} ${e.clinic ? '— принята в лечебнице' : '— лекарь пришла на дом, лечебницы пока нет'}`; }
+      case 'biz': return `Построена ${BIZ[e.key].shop.toLowerCase()}! ${a.trait === 'dreamer' ? whoT(a) : who(a)} открыл${ending(a)} своё дело: ${BIZ[e.key].why}`;
       case 'gift': { const b = agents[e.to]; return `${whoT(a)} угостил${ending(a)} хлебом ${whom(b)}: ${b.female ? 'ей' : 'ему'} не хватило монет на ужин`; }
       case 'sly': return `${whoT(a)} снова утаил${ending(a)} половину налога. Казна недосчиталась монет`;
       case 'harvest': return `Собран урожай! В амбарах уже ${e.grain} мер зерна`;
@@ -313,10 +320,10 @@ export function createSim(world, D) {
   const economy = (hour) => {
     const day = today() - FOUND_DAY, workFrac = workFracAt(hour);
     const L = lifeNow(day, hour);
-    const logsAll = L.logs, logs = logsAll * (1 - TAX), done = Math.min(queue.length, plots.length, Math.floor(logs / HOUSE_COST));
+    const logsAll = L.logs, logs = logsAll * (1 - TAX) - L.shopLogs, done = Math.min(queue.length, plots.length, Math.floor(logs / HOUSE_COST));
     const prog = done < Math.min(queue.length, plots.length) ? (logs % HOUSE_COST) / HOUSE_COST : 0;
     const fish = Math.round(L.fish), harvests = Math.max(0, Math.floor((day + 1) / 6));
-    return { day, logs: Math.floor(logsAll), done, prog, fish, harvests, grain: Math.round(L.grain), workFrac, tax: TAX, treasury: Math.round(L.treasury),
+    return { day, logs: Math.floor(logsAll), done, prog, fish, harvests, grain: Math.round(L.grain), workFrac, tax: TAX, treasury: Math.round(L.treasury), shopLogs: L.shopLogs, sickToday: L.sickToday, healedToday: L.healedToday,
       reserve: { logs: Math.floor(logsAll * TAX), fish: Math.floor(fish * TAX) } };
   };
 
@@ -324,31 +331,60 @@ export function createSim(world, D) {
   const houseObjs = [];       // { k, owner, plot, stage, obj }
   let housesKey = '', housesCount = '';       // что на карте сейчас: стадия стройки и число домов (по отдельности — чтобы не перестраивать дома каждый кадр)
   const houseObs = [];
-  // ---------- мастерские: навес, прилавок и товар своего цвета ----------
-  const stallObs = [], stalls = [];
-  function stallMesh(key) {
-    const g = new THREE.Group(), c = BIZ[key].color, M = col => new THREE.MeshStandardMaterial({ color: col }), add = (geo, col, x, y, z, ry = 0) => { const m = new THREE.Mesh(geo, M(col)); m.position.set(x, y, z); m.rotation.y = ry; g.add(m); return m; };
-    for (const [x, z] of [[-1, -0.6], [1, -0.6], [-1, 0.6], [1, 0.6]]) add(new THREE.BoxGeometry(0.12, 1.8, 0.12), '#6b4a2b', x, 0.9, z);
-    const roof = add(new THREE.BoxGeometry(2.4, 0.1, 1.6), c, 0, 1.85, 0); roof.rotation.x = 0.18;
-    for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(0.46, 0.12, 1.62), i % 2 ? '#f4ead0' : c, -0.96 + i * 0.48, 1.92, 0).rotation.x = 0.18;
-    add(new THREE.BoxGeometry(2.0, 0.7, 0.6), '#8a5f36', 0, 0.35, 0.35); add(new THREE.BoxGeometry(2.1, 0.08, 0.7), '#a87a48', 0, 0.74, 0.35);
-    const goods = { potter: () => [-0.6, 0, 0.6].forEach(x => add(new THREE.CylinderGeometry(0.12, 0.17, 0.3, 7), '#c0704a', x, 0.93, 0.35)),
-      tailor: () => [-0.5, 0.1, 0.6].forEach((x, i) => add(new THREE.BoxGeometry(0.4, 0.08, 0.35), ['#8a5fb0', '#3f6fa5', '#d06050'][i], x, 0.82, 0.35)),
-      smith: () => { add(new THREE.BoxGeometry(0.5, 0.25, 0.25), '#3a3a3a', 0.1, 0.9, 0.35); add(new THREE.BoxGeometry(0.15, 0.15, 0.6), '#5a5a5a', -0.6, 0.86, 0.35); },
-      mill: () => [-0.5, 0.2].forEach(x => add(new THREE.CylinderGeometry(0.2, 0.25, 0.45, 7), '#e8d6a8', x, 1.0, 0.35)),
-      smoke: () => [-0.6, -0.2, 0.2, 0.6].forEach(x => add(new THREE.BoxGeometry(0.25, 0.08, 0.12), '#9a6a3c', x, 0.82, 0.35)),
-      joiner: () => { add(new THREE.BoxGeometry(0.5, 0.35, 0.4), '#a0703a', -0.3, 0.95, 0.35); add(new THREE.BoxGeometry(0.4, 0.05, 0.35), '#c08a4a', 0.45, 0.8, 0.35); },
-      cobbler: () => [-0.4, -0.15, 0.3, 0.55].forEach(x => add(new THREE.BoxGeometry(0.18, 0.12, 0.32), '#6a4a3a', x, 0.84, 0.35)),
-      trader: () => { add(new THREE.BoxGeometry(0.35, 0.3, 0.3), '#c49a5a', -0.5, 0.93, 0.35); add(new THREE.SphereGeometry(0.15, 6, 4), '#d24a3a', 0.1, 0.9, 0.35); add(new THREE.SphereGeometry(0.15, 6, 4), '#e2b23a', 0.45, 0.9, 0.35); },
-      kvass: () => { const b = add(new THREE.CylinderGeometry(0.28, 0.28, 0.55, 9), '#8a5a2a', 0, 1.05, 0.35); b.rotation.z = Math.PI / 2; } };
-    goods[key]?.(); const m = bakeGroup(g); m.castShadow = true; m.receiveShadow = true; return m;
+  // ---------- здания предпринимателей: каждое подходит своему делу; пока строится — леса, брёвна и доски ----------
+  const shopObs = [], shops = [], meshCache = new Map();
+  const WALL = { potter: '#c98a5e', tailor: '#e6d6b0', smith: '#8a8378', mill: '#e8dcc0', smoke: '#8a5a3a', joiner: '#b5834a', cobbler: '#b09070', trader: '#d8b878', kvass: '#a87c4a' };
+  function build3(fn) {           // собирает группу и склеивает в одну сетку (одно обращение к видеокарте на здание)
+    const g = new THREE.Group(), M = col => new THREE.MeshStandardMaterial({ color: col }), add = (geo, col, x, y, z, rx = 0, ry = 0, rz = 0) => { const m = new THREE.Mesh(geo, M(col)); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); g.add(m); return m; };
+    fn(add, M, g); const m = bakeGroup(g); m.castShadow = true; m.receiveShadow = true; return m;
   }
-  function syncStalls() {           // по одной мастерской на каждое открытое дело
-    if (stalls.length === bizList.length) return false;
-    bizList.forEach((b, j) => { if (stalls[j] || !stallSlots[j]) return; const sl = stallSlots[j], rot = Math.atan2(CAMP.x - sl.x, CAMP.y - sl.z), m = stallMesh(b.key);
-      m.position.set(sl.x, groundH(sl.x, sl.z), sl.z); m.rotation.y = rot; scene.add(m);
-      stalls[j] = { key: b.key, x: sl.x, z: sl.z, rot, m, front: null }; stallObs.push({ x: sl.x, z: sl.z, r: 1.25 }); });
-    return true;
+  const BX = (w, h, d) => new THREE.BoxGeometry(w, h, d), CY = (r1, r2, h, n = 8) => new THREE.CylinderGeometry(r1, r2, h, n);
+  const logPile = (add, x, z, k = 1) => { for (let i = 0; i < Math.round(4 * k); i++) add(CY(0.15, 0.15, 1.4, 6), '#a0763f', x + (i % 2) * 0.3 - 0.15, 0.15 + Math.floor(i / 2) * 0.28, z, 0, 0, Math.PI / 2); };
+  function siteMesh(stage) {        // 0 — разметка и брёвна, 1 — стойки, 2 — стены, 3 — стропила
+    const key = 'site' + stage; if (!meshCache.has(key)) meshCache.set(key, build3(add => {
+      const cs = [[-1.5, -1.2], [1.5, -1.2], [-1.5, 1.2], [1.5, 1.2]], H = [0.5, 1.5, 1.6, 1.7][stage];
+      add(BX(3.2, 0.08, 2.6), '#8a6a42', 0, 0.04, 0);
+      cs.forEach(([x, z]) => add(BX(0.14, H, 0.14), '#7a5a32', x, H / 2, z));
+      if (stage >= 1) { add(BX(3.0, 0.1, 0.1), '#7a5a32', 0, H, 1.2); add(BX(3.0, 0.1, 0.1), '#7a5a32', 0, H, -1.2); }
+      if (stage >= 2) { add(BX(3.0, 1.1, 0.08), '#b5834a', 0, 0.6, -1.2); add(BX(0.08, 1.1, 2.4), '#b5834a', -1.5, 0.6, 0); add(BX(0.08, 1.1, 2.4), '#b5834a', 1.5, 0.6, 0); }
+      if (stage >= 3) { for (let i = -2; i <= 2; i++) add(BX(0.08, 0.08, 2.9), '#6f4a28', i * 0.7, 1.95, 0, 0.45 * Math.sign(i || 1) * 0, 0, 0); add(BX(3.2, 0.1, 0.1), '#6f4a28', 0, 2.25, 0); }
+      logPile(add, 2.4, 1.6, stage >= 2 ? 0.5 : 1); add(BX(1.2, 0.12, 0.5), '#c9a06a', -2.3, 0.1, 1.5); add(BX(1.1, 0.12, 0.5), '#c9a06a', -2.3, 0.22, 1.5);
+    })); return meshCache.get(key).clone();
+  }
+  function shopMesh(key) {
+    if (!meshCache.has(key)) meshCache.set(key, build3((add, M, g) => {
+      const c = BIZ[key].color, W = 3.0, D = 2.4;
+      add(BX(W, 1.5, D), WALL[key], 0, 0.75, 0);                                          // стены
+      const sh = new THREE.Shape(); sh.moveTo(-1.5, 0); sh.lineTo(1.5, 0); sh.lineTo(0, 1.0); sh.closePath();   // двускатная крыша цвета дела
+      const roof = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 3.6, bevelEnabled: false }), M(c)); roof.geometry.translate(0, 0, -1.8); roof.rotation.y = Math.PI / 2; roof.position.y = 1.5; g.add(roof);
+      add(BX(0.7, 1.15, 0.1), '#4a2f1a', 0.7, 0.58, D / 2 + 0.03);                        // дверь
+      add(BX(0.6, 0.5, 0.1), '#f4e3b0', -0.8, 0.95, D / 2 + 0.03);                        // окно
+      add(BX(2.1, 0.75, 0.55), '#8a5f36', -0.3, 0.38, D / 2 + 0.6); add(BX(2.2, 0.07, 0.65), '#a8794a', -0.3, 0.78, D / 2 + 0.6);   // прилавок
+      add(BX(2.4, 0.06, 0.9), c, -0.3, 1.45, D / 2 + 0.6, 0.35);                          // навес над прилавком цвета дела
+      for (const sx of [-1.35, 0.75]) add(BX(0.07, 1.4, 0.07), '#6b4a2b', sx, 0.7, D / 2 + 1.0);
+      add(BX(1.3, 0.4, 0.06), c, 0.7, 2.0, D / 2 + 0.2); add(BX(1.0, 0.1, 0.07), '#fff4d6', 0.7, 2.0, D / 2 + 0.24);   // вывеска
+      const gy = 0.84, gz = D / 2 + 0.6, good = {
+        potter: () => { [-0.9, -0.3, 0.3].forEach(x => add(CY(0.12, 0.17, 0.3, 7), '#c0704a', x, gy + 0.15, gz)); add(CY(0.55, 0.65, 0.8, 9), '#7a4a3a', -2.1, 0.4, 0); add(new THREE.SphereGeometry(0.55, 9, 6), '#8a5040', -2.1, 0.85, 0); add(CY(0.12, 0.14, 1.0, 6), '#555', -2.1, 1.6, 0); },
+        tailor: () => { [-0.9, -0.3, 0.3].forEach((x, i) => add(BX(0.4, 0.08, 0.35), ['#8a5fb0', '#3f6fa5', '#d06050'][i], x, gy + 0.05, gz)); add(BX(0.06, 1.8, 0.06), '#6b4a2b', 2.0, 0.9, 0.8); add(BX(0.6, 1.0, 0.04), '#d06050', 2.3, 1.2, 0.8); },
+        smith: () => { add(BX(0.5, 0.25, 0.25), '#3a3a3a', -0.3, gy + 0.12, gz); add(BX(0.15, 0.15, 0.6), '#5a5a5a', -0.9, gy + 0.07, gz); add(BX(0.5, 1.7, 0.5), '#6a645c', -0.9, 2.1, -0.4); add(BX(0.7, 0.4, 0.5), '#3a3a3a', 2.0, 0.2, 0.6); add(BX(0.6, 0.18, 0.4), '#d24a2a', 2.0, 0.45, 0.6); },
+        mill: () => { [-0.9, -0.3].forEach(x => add(CY(0.2, 0.25, 0.45, 7), '#f2e6c6', x, gy + 0.22, gz)); add(BX(0.18, 3.6, 0.06), '#6b4a2b', 0, 2.5, D / 2 + 0.55); add(BX(3.6, 0.18, 0.06), '#6b4a2b', 0, 2.5, D / 2 + 0.55);
+          for (const [x, y, w, h] of [[0.9, 3.2, 1.2, 0.7], [-0.9, 1.8, 1.2, 0.7], [1.5, 1.6, 0.7, 1.2], [-1.5, 3.4, 0.7, 1.2]]) add(BX(w, h, 0.04), '#f2e6c6', x, y, D / 2 + 0.52); },
+        smoke: () => { [-0.9, -0.5, -0.1, 0.3].forEach(x => add(BX(0.25, 0.08, 0.12), '#c08a4a', x, gy + 0.05, gz)); add(BX(0.55, 2.6, 0.55), '#7a4a2a', -1.0, 1.9, -0.5); add(BX(0.7, 0.12, 0.7), '#5a3a22', -1.0, 3.25, -0.5); add(BX(0.1, 1.2, 1.2), '#6b4a2b', 2.0, 0.6, 0.6); },
+        joiner: () => { add(BX(0.5, 0.35, 0.4), '#a0703a', -0.9, gy + 0.17, gz); add(BX(0.4, 0.05, 0.35), '#c08a4a', -0.1, gy + 0.03, gz); for (let i = 0; i < 5; i++) add(BX(1.6, 0.08, 0.5), '#c9a06a', 2.1, 0.1 + i * 0.1, 0.4); add(BX(0.8, 0.5, 0.1), '#8a5f36', 2.1, 0.55, 1.3); },
+        cobbler: () => { [-0.9, -0.55, -0.2, 0.15].forEach(x => add(BX(0.18, 0.12, 0.32), '#6a4a3a', x, gy + 0.06, gz)); add(BX(0.9, 0.6, 0.12), '#7a5a3a', 2.0, 0.5, 0.5); [0, 1, 2].forEach(i => add(BX(0.2, 0.12, 0.34), '#4a3224', 1.75 + i * 0.25, 0.6, 0.6)); },
+        trader: () => { add(BX(0.35, 0.3, 0.3), '#c49a5a', -0.9, gy + 0.15, gz); add(new THREE.SphereGeometry(0.15, 6, 4), '#d24a3a', -0.35, gy + 0.15, gz); add(new THREE.SphereGeometry(0.15, 6, 4), '#e2b23a', 0.05, gy + 0.15, gz); for (let i = 0; i < 4; i++) add(BX(0.6, 0.5, 0.6), '#c49a5a', 2.0, 0.25 + (i > 1 ? 0.5 : 0), 0.4 + (i % 2) * 0.1); },
+        kvass: () => { add(CY(0.28, 0.28, 0.55, 9), '#8a5a2a', -0.6, gy + 0.28, gz, 0, 0, Math.PI / 2); [0, 1, 2].forEach(i => add(CY(0.4, 0.4, 0.8, 9), '#8a5a2a', 2.0, 0.4, -0.5 + i * 0.85)); add(BX(0.7, 0.4, 0.06), '#6b4a2b', 2.0, 1.2, 0.9); },
+      }; good[key]?.();
+    })); return meshCache.get(key).clone();
+  }
+  // по одному зданию на каждое дело: сначала стройка (стадии по ходу работы), потом готовое здание
+  function syncShops() {
+    let ret = false;
+    bizList.forEach((b, j) => { const sl = shopSlots[j]; if (!sl) return;
+      const stage = b.state === 'open' ? 9 : Math.min(3, Math.floor(b.p * 4)); let st = shops[j];
+      if (!st) { const rot = Math.atan2(CAMP.x - sl.x, CAMP.y - sl.z); st = shops[j] = { key: b.key, x: sl.x, z: sl.z, rot, m: null, stage: -1, front: null }; shopObs.push({ x: sl.x, z: sl.z, r: 2.1 }); ret = 'new'; }
+      if (st.stage !== stage) { if (st.m) scene.remove(st.m); st.m = stage === 9 ? shopMesh(b.key) : siteMesh(stage); st.m.position.set(sl.x, groundH(sl.x, sl.z), sl.z); st.m.rotation.y = st.rot; scene.add(st.m); st.stage = stage; ret = ret || 'stage'; } });
+    return ret;
   }
   function syncHouses(eco) {
     const key = eco.done + ':' + Math.floor(eco.prog * 20);
@@ -390,7 +426,7 @@ export function createSim(world, D) {
   // ---------- сетка проходимости ----------
   const nav = new Nav(CAMP.x - R - 18, CAMP.y - R - 18, CAMP.x + R + 18, CAMP.y + R + 18, 0.5);
   function rebuildNav() {
-    const all = OBS.concat(houseObs, stallObs, [treeOb]);
+    const all = OBS.concat(houseObs, shopObs, [treeOb]);
     for (let k = 0; k < nav.g.length; k++) {
       const [x, z] = nav.center(k);
       let v = x > riverX(z) - 3.2 ? 1 : 0;
@@ -424,7 +460,10 @@ export function createSim(world, D) {
     agents.forEach(a => { if (a.house) a.house.door = freeNear(a.house.x, a.house.z); });
     woodcutters.forEach((a, k) => a.pileSpot = freeNear(pile.x + Math.sin(k * 2.4) * 1.5, pile.z + Math.cos(k * 2.4) * 1.5));
     assignFish();
-    stalls.forEach(st => { st.front = freeNear(st.x + Math.sin(st.rot) * 1.0, st.z + Math.cos(st.rot) * 1.0); });
+    if (clinic) { const dir = Math.atan2(CAMP.x - clinic.x, CAMP.y - clinic.z);       // места перед лечебницей: у входа — лекарь, по дуге — больные
+      clinic.heal = freeNear(clinic.x + Math.sin(dir) * 2.6, clinic.z + Math.cos(dir) * 2.6);
+      clinic.spots = Array.from({ length: 14 }, (_, k) => { const a = dir + (k / 13 - 0.5) * 2.2; return freeNear(clinic.x + Math.sin(a) * 3.9, clinic.z + Math.cos(a) * 3.9); }); }
+    shops.forEach(st => { st.front = freeNear(st.x + Math.sin(st.rot) * 2.4, st.z + Math.cos(st.rot) * 2.4); });
     agents.forEach(a => { const ang = hash(a.i + 31) * 6.283, r = 4.6 + hash(a.i + 33) * 3.2; a.dinner = freeNear(CAMP.x + Math.cos(ang) * r, CAMP.y + Math.sin(ang) * r * 0.9); });
   }
 
@@ -488,6 +527,7 @@ export function createSim(world, D) {
     const cyc = a.workLen + 1, pos = ((h + a.restOff) % cyc + cyc) % cyc, rest = pos >= a.workLen;
     return { rest, energy: Math.round(rest ? 25 + 75 * (pos - a.workLen) : 100 - 75 * pos / a.workLen), left: rest ? Math.round((cyc - pos) * 60) : 0 };
   }
+  const sickSpot = a => clinic && clinic.spots ? clinic.spots[a.i % clinic.spots.length] : (a.house && a.house.done && a.house.door ? a.house.door : a.hut);
   // ---------- распорядок дня ----------
   function plan(a, h, eco) {
     // ночи нет: работают весь день, а устав — берут перерыв на 1 час
@@ -508,12 +548,18 @@ export function createSim(world, D) {
       if (a.carry) { const b = houseObjs.find(o => o.p < 1); const g2 = b ? freeNear(b.plot.x - Math.cos(b.plot.rot) * 2.6, b.plot.z + Math.sin(b.plot.rot) * 2.6) : a.pileSpot; return { act: 'carry', goal: g2, to: b ? b.owner : null }; }
       const side = woodcutters[0] === a ? 1 : -1; return { act: 'chop', goal: freeNear(tree.x + side * 0.8, tree.z + 0.85), face: [tree.x, tree.z] };
     }
-    if (BIZ[a.role]) { const j = bizList.findIndex(b => b.owner === a), st = stalls[j];
+    if (a.sick === 1 || (a.sick === 2 && h < 13)) return { act: 'sick', goal: sickSpot(a) };         // заболел: лежит дома (или в лечебнице) — до обеда, если лекарь успел, иначе весь день
+    if (a.bld) { const st = shops[bizList.findIndex(b => b.owner === a)]; if (st && st.front) return { act: 'shopbuild', goal: st.front, face: [st.x, st.z] }; }   // строит своё здание
+    if (BIZ[a.role]) { const j = bizList.findIndex(b => b.owner === a && b.state === 'open'), st = shops[j];
       if (st && st.front) return { act: 'craft', goal: st.front, face: [st.x, st.z] }; }
     if (a.role === 'fish') return { act: 'fish', goal: a.spot };
     if (a.role === 'farm') { if (!a.farmGoal || a.farmDone) { a.farmGoal = freeNear(...farm.spot(), true); a.farmDone = false; a.dwell = 4 + Math.random() * 8; } return { act: 'farm', goal: a.farmGoal, farm: true }; }
     if (a.role === 'herd') { if (!a.herdGoal || a.herdDone) { a.herdGoal = freeNear(pen.x - 4.6 - Math.random() * 1.3, pen.y - 2 + Math.random() * 4); a.herdDone = false; a.dwell = 3 + Math.random() * 5; } return { act: 'herd', goal: a.herdGoal }; }
     if (a.role === 'cook') return { act: 'cook', goal: freeNear(pile.x + 1.4, pile.z - 1.2), face: [CAMP.x, CAMP.y] };
+    if (a.role === 'herbal' && clinic && clinic.heal) return { act: 'heal', goal: clinic.heal, face: [clinic.x, clinic.z] };   // лечебница есть — принимает там
+    if (a.role === 'herbal' && sickList.length) {                                                                    // лечебницы нет — ходит по домам к больным
+      if (!a.healGoal || a.healDone) { a.healIdx = (a.healIdx || 0) + 1; const pt = sickList[a.healIdx % sickList.length], sp = sickSpot(pt); a.healTo = pt; a.healGoal = freeNear(sp[0] + 0.9, sp[1]); a.healDone = false; a.dwell = 6 + Math.random() * 4; }
+      return { act: 'heal', goal: a.healGoal, face: a.healTo ? sickSpot(a.healTo) : null }; }
     if (a.role === 'herbal') { if (!a.herbGoal || a.herbDone) { a.herbGoal = randomSpot(R + 2); a.herbDone = false; a.dwell = 5 + Math.random() * 6; } return { act: 'herb', goal: a.herbGoal }; }
     if (!a.walkGoal || a.walkDone) { a.walkGoal = randomSpot(); a.walkDone = false; a.dwell = 2 + Math.random() * 8; }
     return { act: 'walk', goal: a.walkGoal };
@@ -524,12 +570,15 @@ export function createSim(world, D) {
     const e = lastEco, b = houseObjs.find(o => o.p < 1), q = queue.indexOf(a), act = a.act;
     const own = a.house, nextOwner = b && b.owner ? b.owner.gen : null;
     const coins = Math.floor(a.coins ?? 0), L = a.L, alt = (Math.floor(Date.now() / 7000) + a.i) % 3 === 0, ranks = ladder(a.role);
+    if (act === 'sick') return clinic ? (a.sick === 2 ? 'Заболел. В лечебнице уже занимаются мной — к обеду встану' : 'Заболел. В лечебнице очередь, лекарь не успевает…') : (a.sick === 2 ? 'Заболел. Баба Нюра придёт на дом — к обеду встану' : 'Слёг с простудой. Лекарь одна, а больных много…');
+    if (act === 'heal') return clinic ? 'Принимаю больных в лечебнице: теперь успеваю больше' : `Лечебницы нет — хожу по домам${a.healTo ? ', иду к ' + a.healTo.gen : ''}. Здание строить не нужно, лечу так`;
+    if (act === 'shopbuild') { const m = bizList.find(b => b.owner === a); return m ? `Строю ${BUILD[m.key].what}: готово на ${Math.round(m.p * 100)}%. Брёвна купил на свои деньги (${coinsW(m.paid)})` : 'Строю своё дело'; }
     // деньги и карьера
     // характер
     if (act !== 'rest' && act !== 'eat' && (Math.floor(Date.now() / 9000) + a.i) % 4 === 0) {
       const T = { grump: TAX ? 'Опять этот налог… Ворчу, но работаю честно' : 'Всё не так, всё не эдак! Но работать надо',
         rebel: TAX ? 'Долой налог! Напишу в Думу свой закон' : 'Никто мне не указ! Сам решаю, как жить',
-        merry: 'Слыхали, как Гришина корова Марфу обогнала? Ха-ха!', dreamer: BIZ[a.role] ? 'Моя мастерская — только начало. Мечтаю о целом заводе!' : `Мечтаю о своём деле. Коплю ${START_COST} монет`,
+        merry: 'Слыхали, как Гришина корова Марфу обогнала? Ха-ха!', dreamer: BIZ[a.role] ? 'Моя мастерская — только начало. Мечтаю о целом заводе!' : `Мечтаю о своём деле. Коплю на брёвна для здания`,
         lazy: 'Эх, поскорее бы перерыв…', hard: 'Работа не волк — а я её люблю!', sly: TAX ? 'Если никто не видит — налог можно заплатить и поменьше…' : 'Где бы урвать выгоду?',
         kind: 'Если кто-то голоден — поделюсь хлебом', generous: 'Вечером зайду в мастерские — люблю красивые вещи', stingy: 'Каждая монета на счету. Коплю!' };
       return T[a.trait];
@@ -538,8 +587,8 @@ export function createSim(world, D) {
       if (a.hungry && coins < BREAD) return ranks ? 'Монет не хватило на хлеб… Работаю — к вечеру будут деньги' : 'Денег нет даже на хлеб. Пора искать работу!';
       if (!ranks && coins < 14) return `Осталось ${coinsW(coins)} — скоро пойду устраиваться на работу`;
       if (!ranks && alt) return `Пока без работы. Живу на сбережения: ${coinsW(coins)}`;
-      const own = BIZ[a.role] && bizList.find(b => b.owner === a);
-      if (own && own.d === lastEco.day) return `Открыл${a.female ? 'а' : ''} своё дело — ${BIZ[a.role].shop.toLowerCase()}! Спрос есть: ${BIZ[a.role].why}`;
+      const own = BIZ[a.role] && bizList.find(b => b.owner === a && b.state === 'open');
+      if (own && own.ready === lastEco.day) return `Открыл${a.female ? 'а' : ''} своё дело — ${BIZ[a.role].shop.toLowerCase()}! Спрос есть: ${BIZ[a.role].why}`;
       if (own && alt && lastHour >= PAYDAY) return `Сегодня продал${a.female ? 'а' : ''} ${own.sold || 0} товаров — выручка ${coinsW(Math.round(a.pay || 0))}`;
       if (own && alt) return `Я ${BIZ[a.role].name}, своё дело. Чем лучше товар — тем больше покупателей`;
       if (ranks && !own && lastHour >= PAYDAY && lastHour < PAYDAY + 1.5 && a.pay > 0) return `Получил${a.female ? 'а' : ''} зарплату — ${coinsW(Math.round(a.pay))}!`;
@@ -589,8 +638,8 @@ export function createSim(world, D) {
     if (rolesChanged) { rolesChanged = false; assignFish(); }
     if (dn !== dayKey) { dayKey = dn; [tree.x, tree.z] = treeSpot(dn); tree.t.position.set(tree.x, groundH(tree.x, tree.z), tree.z); treeOb.x = tree.x; treeOb.z = tree.z; housesKey = housesCount = ''; }
     const hc = syncHouses(eco);
-    const sc = syncStalls();
-    if (hc === 'count' || first || sc) { rebuildNav(); placeFixedSpots(); agents.forEach(a => { a.pk = ''; }); }
+    const sc = syncShops();
+    if (hc === 'count' || first || sc === 'new') { rebuildNav(); placeFixedSpots(); agents.forEach(a => { a.pk = ''; }); }
     else if (hc && lastDone !== eco.done) placeFixedSpots();
     lastDone = eco.done;
     if (hc || sc) housesChanged = true;
@@ -599,7 +648,7 @@ export function createSim(world, D) {
     { const s2 = 0.25 + 0.75 * Math.min(1, grow * 1.1); if (farm.s2 !== s2) { farm.s2 = s2; farm.crops.forEach(c => { dummy.position.set(c.x, 0.17 + c.h * s2, c.z); dummy.rotation.set(0, c.ry, 0); dummy.scale.setScalar(s2); dummy.updateMatrix(); c.im.setMatrixAt(c.j, dummy.matrix); c.im.instanceMatrix.needsUpdate = true; }); } };
     farm.wheatM.color.setRGB(0.56 + 0.32 * grow, 0.75 - 0.05 * grow, 0.29 - 0.12 * grow);
 
-    const cnt = { rest: 0, chop: 0, carry: 0, build: 0, fish: 0, farm: 0, herd: 0, eat: 0, walk: 0, cook: 0, herb: 0, craft: 0 };
+    const cnt = { sick: 0, heal: 0, shopbuild: 0, rest: 0, chop: 0, carry: 0, build: 0, fish: 0, farm: 0, herd: 0, eat: 0, walk: 0, cook: 0, herb: 0, craft: 0 };
     for (const a of agents) {
       const pl = plan(a, hour, eco); a.plan = pl; a.act = pl.act;
       const goal = pl.goal || [a.x, a.z];
@@ -614,7 +663,7 @@ export function createSim(world, D) {
         if (a.pi >= a.path.length) { const last = a.path[a.path.length - 1]; if (Math.hypot(last[0] - goal[0], last[1] - goal[1]) < 0.6 && nav.passAt(goal[0], goal[1], !!pl.farm)) { a.x = goal[0]; a.z = goal[1]; } arrived = true; a.pk = a.pk + '#done'; a.reachedKey = a.pk; }
       }
       // задержка на месте, потом следующая цель (поле, прогулка, пастбище, травы)
-      if (arrived && a.dwell != null) { a.dwell -= dt; if (a.dwell <= 0) { if (a.act === 'farm') a.farmDone = true; else if (a.act === 'herd') a.herdDone = true; else if (a.act === 'herb') a.herbDone = true; else if (a.act === 'walk') a.walkDone = true; } }
+      if (arrived && a.dwell != null) { a.dwell -= dt; if (a.dwell <= 0) { if (a.act === 'farm') a.farmDone = true; else if (a.act === 'herd') a.herdDone = true; else if (a.act === 'herb') a.herbDone = true; else if (a.act === 'heal') a.healDone = true; else if (a.act === 'walk') a.walkDone = true; } }
       // лесоруб: 7 ударов → бревно на плечо → отнёс → снова рубит
       if (a.act === 'chop' && arrived) { a.swing += dt * (a.mult || 1); if (a.swing >= 7) { a.swing = 0; a.carry = true; } }
       if (a.act === 'carry' && arrived) a.carry = false;
@@ -623,13 +672,14 @@ export function createSim(world, D) {
 
       // ----- поза тела и рук -----
       let y = groundH(a.x, a.z), rx = 0, rz = 0, sy = 1, rot = a.rot ?? 0, armL = 0.08, armR = 0.08, tool = false;
-      const sitting = arrived && (a.act === 'fish' || a.act === 'rest' || a.act === 'eat');
+      const sitting = arrived && (a.act === 'fish' || a.act === 'rest' || a.act === 'eat' || a.act === 'sick');
       if (pl.face && arrived) rot = Math.atan2(pl.face[0] - a.x, pl.face[1] - a.z);
       if (a.act === 'eat' && arrived && pl.goal === a.dinner) rot = Math.atan2(CAMP.x - a.x, CAMP.y - a.z);
       if (moving) { const w = Math.sin(t * 9 + a.phase); y += Math.abs(w) * 0.06; rz = w * 0.04; armL = w * 0.6; armR = -w * 0.6;
         if (a.act === 'carry') { armL = armR = -2.7; } }
       else if (a.act === 'chop' && arrived) { const ph = (a.swing % 1) / 1; const k = ph < 0.62 ? ph / 0.62 : 1 - (ph - 0.62) / 0.38; armL = armR = -0.5 - 2.4 * k; rx = 0.25 * (1 - k) - 0.08; tool = true; }
-      else if ((a.act === 'build' || a.act === 'craft') && arrived) { const k = Math.abs(Math.sin(t * 4.2 + a.phase)); armR = -0.6 - 1.9 * k; armL = -0.9; rx = 0.12; tool = true; }
+      else if (a.act === 'heal' && arrived) { rx = 0.35; armL = -0.9 + Math.sin(t * 1.6 + a.phase) * 0.25; armR = -1.3; }
+      else if ((a.act === 'build' || a.act === 'craft' || a.act === 'shopbuild') && arrived) { const k = Math.abs(Math.sin(t * 4.2 + a.phase)); armR = -0.6 - 1.9 * k; armL = -0.9; rx = 0.12; tool = true; }
       else if (a.act === 'farm' && arrived) { rx = 0.55 + Math.sin(t * 2.2 + a.phase) * 0.12; armL = armR = -1.0 + Math.sin(t * 2.2 + a.phase) * 0.35; }
       else if (a.act === 'cook' && arrived) { armL = armR = -1.1 + Math.sin(t * 3 + a.phase) * 0.25; rx = 0.15; }
       else if (a.act === 'herb' && arrived) { rx = 0.7; armL = armR = -1.2; }
@@ -678,7 +728,7 @@ export function createSim(world, D) {
     }
     const b = houseObjs.find(o => o.p < 1);
     const workers = agents.filter(a => ladder(a.role)), best = workers.reduce((m, a) => !m || (a.L.rank * 10 + a.L.lvl) > (m.L.rank * 10 + m.L.lvl) ? a : m, null);
-    const lifeStats = { biz: bizList.length, masters: workers.filter(a => a.L.rank >= 1).length, jobless: agents.length - workers.length, hungry: agents.filter(a => a.hungry).length,
+    const lifeStats = { biz: bizList.filter(b => b.state === 'open').length, building: bizList.filter(b => b.state === 'build').length, sick: lifeCur.sickToday, healed: lifeCur.healedToday, clinic: !!clinic, masters: workers.filter(a => a.L.rank >= 1).length, jobless: agents.length - workers.length, hungry: agents.filter(a => a.hungry).length,
       avgCoins: Math.round(agents.reduce((x, a) => x + (a.coins || 0), 0) / agents.length), hiredToday: agents.filter(a => a.hiredDay === eco.day).length,
       best: best ? { who: best.name, title: titleOf(best.role, best.L) } : null };
     stats = { huts: huts.length, hutOcc, hutCap: HUT_CAPACITY, ...cnt, life: lifeStats, wood: cnt.chop, animals: animals.filter(an => an.g.visible).length, shown, pop, felled: fall >= 1 ? 1 : 0, trees: 1, prog: eco.workFrac,
@@ -693,7 +743,10 @@ export function createSim(world, D) {
     if (!ranks) return { title: 'Без работы', line: 'Ищет работу: без неё нечем платить за хлеб и место в шалаше', frac: 0 };
     const next = L.top ? null : L.lvl < 10 ? `${L.lvl + 1} ур.` : ranks[L.rank + 1];
     const biz = BIZ[a.role], own = biz && bizList.find(b => b.owner === a), paid = lastHour >= PAYDAY, pay = Math.round(a.pay || 0), wage = wageOf(a.role, L, TAX);
-    const money = biz ? `Своё дело — ${biz.shop.toLowerCase()}. Открыл${a.female ? 'а' : ''} ${own && own.d === lastEco.day ? 'сегодня' : 'на ' + ((own?.d ?? 0) + 1) + '-й день государства'}, вложив ${START_COST} монет. Доход — от покупателей` + (paid ? `: сегодня ${coinsW(pay)}` : ', выручку считают вечером')
+    const mine = bizList.find(b => b.owner === a), building = mine && mine.state === 'build', healer = a.role === 'herbal';
+    const money = building ? `Строит ${BUILD[mine.key].what}: готово на ${Math.round(mine.p * 100)}%. Купил ${mine.mats} ${plural(mine.mats, 'бревно', 'бревна', 'брёвен')} у лесорубов за ${coinsW(mine.paid)}. Пока строит — не работает и не получает зарплату`
+      : biz ? `Своё дело — ${biz.shop.toLowerCase()}, построена на брёвна, купленные за ${coinsW(own?.paid ?? 0)}. Открыл${a.female ? 'а' : ''} на ${((own?.ready ?? 0) + 1)}-й день государства. Доход — от покупателей` + (paid ? `: сегодня ${coinsW(pay)}` : ', выручку считают вечером')
+      : healer ? (clinic ? `Лекарь: принимает больных в лечебнице (до 20 в день), берёт 3 монеты за визит. Зарплата ${coinsW(wage)} в день` : `Лекарь без здания: ходит по домам и лечит (до 5 больных в день), берёт 3 монеты за визит. Лечебницу должно построить государство. Зарплата ${coinsW(wage)} в день`)
       : `Зарплата: ${coinsW(wage)} в день, выдаётся в ${PAYDAY}:00` + (TAX ? ' (налог 10% уже вычтен)' : '') + (paid ? ` · сегодня получил${a.female ? 'а' : ''} ${coinsW(pay)}` : '') + (L.top ? '' : ` · на следующей должности — больше`);
     return { title: a.female ? titleOf(a.role, L).replace(/^Начинающий /, 'Начинающая ') : titleOf(a.role, L), rankNo: L.rank + 1, frac: L.frac, next, speed: Math.round((a.mult - 1) * 100), top: L.top, money, biz: !!biz,
       line: L.top ? 'Вершина карьеры — своё производство!' : `Должность ${L.rank + 1} из 10 · до «${next}» ≈ ${Math.max(1, Math.round(L.dayLeft / a.talent))} ${plural(Math.max(1, Math.round(L.dayLeft / a.talent)), 'рабочий день', 'рабочих дня', 'рабочих дней')}` };
@@ -728,7 +781,7 @@ export function createSim(world, D) {
     update: (dt, hour, t) => { lastHour = hour; update(dt, hour, t); },
     stats: () => stats, info, pick, headPos, thought, agents: () => agents,
     diary, dateOf,
-    biz: () => bizList.map((b, j) => ({ key: b.key, shop: BIZ[b.key].shop, why: BIZ[b.key].why, owner: b.owner.name, ownerGen: b.owner.gen, title: titleOf(b.key, b.owner.L || levelOf(0)), day: b.d, x: stalls[j]?.x, z: stalls[j]?.z, agent: b.owner })),
+    biz: () => bizList.map((b, j) => ({ key: b.key, state: b.state, p: b.p, shop: BIZ[b.key].shop, why: BIZ[b.key].why, what: BUILD[b.key].what, mats: b.mats, paid: b.paid, owner: b.owner.name, ownerGen: b.owner.gen, title: titleOf(b.key, b.owner.L || levelOf(0)), day: b.d, ready: b.ready, x: shops[j]?.x, z: shops[j]?.z, agent: b.owner })),
     housesChanged: () => { const c = housesChanged; housesChanged = false; return c; },
     houses: () => houseObjs.map(o => ({ x: o.plot.x, z: o.plot.z, p: o.p, owner: o.owner ? o.owner.gen : '' })),
     farm: [farm.fx, farm.fz], trees: () => [[tree.x, tree.z]], pile: [pile.x, pile.z],
