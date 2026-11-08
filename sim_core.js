@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { animal, bakeGroup } from './sim_animals.js';
-import { FOUND_DAY, workFracAt, createLife, logsUntil, levelOf, multOf, titleOf, talentOf, RANKS, PLACE, BREAD, MEALS, BIZ, ladder, wageOf, personName, PAYDAY, START_COST } from './sim_life.js';
+import { FOUND_DAY, workFracAt, createLife, logsUntil, levelOf, multOf, titleOf, talentOf, RANKS, PLACE, BREAD, MEALS, BIZ, ladder, wageOf, personName, PAYDAY, START_COST, TRAITS, traitOf } from './sim_life.js';
 
 const MAX_SHOWN = 700;
 const LUNCH_FROM = 13, LUNCH_TO = 13.7;
@@ -242,6 +242,7 @@ export function createSim(world, D) {
 
   const gens = { grisha: 'Гриши', pakhom: 'Старосты Пахома', timosha: 'Тимоши', marfa: 'Марфы', arkadiy: 'Аркадия', nyura: 'Бабы Нюры' };
   const names = { grisha: 'Гриша', pakhom: 'Староста Пахом', timosha: 'Тимоша', marfa: 'Марфа', arkadiy: 'Аркадий', nyura: 'Баба Нюра' };
+  const accs = { marfa: 'Марфу', nyura: 'Бабу Нюру' };
   const resByNum = new Map((D.residents || []).map(r => [r.num, r]));
   const agents = [];
   const nFish = clamp(Math.round(shown * 0.08), 2, 16), nFarm = clamp(Math.round(shown * 0.12), 2, 40);
@@ -253,7 +254,7 @@ export function createSim(world, D) {
     else if (i === 6) role = 'wood'; else if (i < 7 + nFish) role = 'fish'; else if (i < 7 + nFish + nFarm) role = 'farm';
     const res = resByNum.get(i + 1);
     const fem = tplDefs[tpl].female || named === 'marfa' || named === 'nyura';
-    agents.push({ i, tpl, role, named, name: named ? names[named] : res ? '@' + res.nick : personName(i, fem).name, gen: named ? gens[named] : res ? '@' + res.nick : personName(i, fem).gen, x: 0, z: 0, tx: 0, tz: 0, path: null, pk: '', speed: 1.1 + hash(i + 3) * 0.45,
+    agents.push({ i, tpl, role, named, name: named ? names[named] : res ? '@' + res.nick : personName(i, fem).name, gen: named ? gens[named] : res ? '@' + res.nick : personName(i, fem).gen, acc: named ? (accs[named] || gens[named]) : res ? '@' + res.nick : personName(i, fem).acc, x: 0, z: 0, tx: 0, tz: 0, path: null, pk: '', speed: 1.1 + hash(i + 3) * 0.45,
       swing: hash(i + 21) * 7, workLen: 3.5 + hash(i + 7) * 2.5, restOff: hash(i + 8) * 7, phase: hash(i + 5) * 6.28, female: tplDefs[tpl].female || named === 'marfa' || named === 'nyura',
       act: 'walk', wait: 0, stuck: 0 });
   }
@@ -267,7 +268,7 @@ export function createSim(world, D) {
   // ---------- жизнь: опыт, должности, деньги (sim_life.js) ----------
   const hist = (D.popHistory || []).map(e => ({ d: Math.floor(Date.parse(e.date + 'T12:00:00Z') / 864e5) - FOUND_DAY, shown: Math.max(8, Math.round(e.pop * 0.5)) })).sort((p, q) => p.d - q.d);
   const joinOf = i => { if (!hist.length) return 0; const e = hist.find(x => x.shown > i); return e ? Math.max(0, e.d) : Math.max(0, today() - FOUND_DAY); };
-  agents.forEach(a => { a.role0 = a.role; a.join = joinOf(a.i); a.talent = talentOf(a.i); });
+  agents.forEach(a => { a.role0 = a.role; a.join = joinOf(a.i); a.talent = talentOf(a.i); a.trait = traitOf(a.i); a.traitName = TRAITS[a.trait][a.female ? 'f' : 'm']; a.workLen = Math.max(2, a.workLen + (TRAITS[a.trait].work || 0)); });
   const life = createLife(agents.map(a => ({ i: a.i, role: a.role0, join: a.join })), TAX, HOUSE_COST);
   let lifeKey = '', lifeCur = null, rolesChanged = false, bizList = [];
   function lifeNow(day, hour) {
@@ -276,6 +277,34 @@ export function createSim(world, D) {
     agents.forEach((a, j) => { const r = lifeCur.role[j]; if (r !== a.role) { a.role = r; a.pk = ''; rolesChanged = true; } a.L = levelOf(lifeCur.xp[j]); a.mult = multOf(a.L); a.coins = lifeCur.coins[j]; a.hungry = !!lifeCur.hungry[j]; a.hiredDay = lifeCur.hiredDay[j]; a.pay = lifeCur.pay[j]; });
     bizList = lifeCur.biz.map(b => ({ ...b, owner: agents[b.k] }));
     return lifeCur;
+  }
+  // ---------- дневник поселения: события из жизни жителей ----------
+  const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  const dateOf = d => { const t = new Date((FOUND_DAY + d) * 864e5); return t.getUTCDate() + ' ' + MONTHS[t.getUTCMonth()]; };
+  const hm = h => String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0');
+  const ending = a => a.female ? 'а' : '';
+  const who = a => a.name, whoT = a => `${a.traitName} ${a.name}`, whom = a => a.acc;
+  const firstPromo = e => { const L = lifeCur?.log || []; return L.find(x => x.t === 'promo' && x.role === e.role && x.rank === e.rank) === e; };
+  function diaryText(e) {
+    const a = agents[e.k];
+    switch (e.t) {
+      case 'hire': return `${who(a)} устроил${a.female ? 'ась' : 'ся'} на работу ${PLACE[e.r]}: монеты кончились, а хлеб платный`;
+      case 'promo': return `${whoT(a)} получил${ending(a)} повышение — теперь ${ladder(e.role)[e.rank]}${firstPromo(e) ? ' — перв' + (a.female ? 'ая' : 'ый') + ' в государстве!' : ''}${a.trait === 'hard' ? '. Трудолюбие окупается!' : a.trait === 'lazy' ? '. Хоть и не спешил' + ending(a) + '…' : ''}`;
+      case 'biz': return `${a.trait === 'dreamer' ? whoT(a) : who(a)} открыл${ending(a)} своё дело — ${BIZ[e.key].shop.toLowerCase()}: ${BIZ[e.key].why}. Вложено ${START_COST} монет`;
+      case 'gift': { const b = agents[e.to]; return `${whoT(a)} угостил${ending(a)} хлебом ${whom(b)}: ${b.female ? 'ей' : 'ему'} не хватило монет на ужин`; }
+      case 'sly': return `${whoT(a)} снова утаил${ending(a)} половину налога. Казна недосчиталась монет`;
+      case 'harvest': return `Собран урожай! В амбарах уже ${e.grain} мер зерна`;
+      case 'house': { const o = queue[e.n - 1]; return o ? `Достроен дом ${o.gen}! Новоселье — и место в шалаше освободилось` : `Достроен ещё один дом`; }
+    }
+    return '';
+  }
+  // общий дневник — только заметное: первый мастер в профессии и повышения с 3-й должности; личный — всё о жителе
+  function diary(limit = 40, k = null) {
+    const L = lifeCur?.log || [], out = [], firsts = new Set(), seen = new Set();
+    for (const e of L) if (e.t === 'promo') { const key = e.role + ':' + e.rank; if (!seen.has(key)) { seen.add(key); firsts.add(e); } }
+    for (let j = L.length - 1; j >= 0 && out.length < limit * 3; j--) { const e = L[j];
+      if (k != null ? e.k !== k && e.to !== k : e.t === 'promo' && e.rank < 2 && !firsts.has(e)) continue; if (e.k != null && !agents[e.k]) continue; out.push(e); }
+    return out.sort((p, q) => q.d - p.d || q.h - p.h).slice(0, limit).map(e => ({ d: e.d, date: dateOf(e.d), time: hm(e.h), text: diaryText(e), t: e.t, k: e.k }));
   }
   { const d0 = new Date(Date.now() + 3 * 3600e3); lifeNow(today() - FOUND_DAY, d0.getUTCHours() + d0.getUTCMinutes() / 60); rolesChanged = false; }
 
@@ -495,6 +524,15 @@ export function createSim(world, D) {
     const own = a.house, nextOwner = b && b.owner ? b.owner.gen : null;
     const coins = Math.floor(a.coins ?? 0), L = a.L, alt = (Math.floor(Date.now() / 7000) + a.i) % 3 === 0, ranks = ladder(a.role);
     // деньги и карьера
+    // характер
+    if (act !== 'rest' && act !== 'eat' && (Math.floor(Date.now() / 9000) + a.i) % 4 === 0) {
+      const T = { grump: TAX ? 'Опять этот налог… Ворчу, но работаю честно' : 'Всё не так, всё не эдак! Но работать надо',
+        rebel: TAX ? 'Долой налог! Напишу в Думу свой закон' : 'Никто мне не указ! Сам решаю, как жить',
+        merry: 'Слыхали, как Гришина корова Марфу обогнала? Ха-ха!', dreamer: BIZ[a.role] ? 'Моя мастерская — только начало. Мечтаю о целом заводе!' : `Мечтаю о своём деле. Коплю ${START_COST} монет`,
+        lazy: 'Эх, поскорее бы перерыв…', hard: 'Работа не волк — а я её люблю!', sly: TAX ? 'Если никто не видит — налог можно заплатить и поменьше…' : 'Где бы урвать выгоду?',
+        kind: 'Если кто-то голоден — поделюсь хлебом', generous: 'Вечером зайду в мастерские — люблю красивые вещи', stingy: 'Каждая монета на счету. Коплю!' };
+      return T[a.trait];
+    }
     if (act !== 'rest') {
       if (a.hungry && coins < BREAD) return ranks ? 'Монет не хватило на хлеб… Работаю — к вечеру будут деньги' : 'Денег нет даже на хлеб. Пора искать работу!';
       if (!ranks && coins < 14) return `Осталось ${coinsW(coins)} — скоро пойду устраиваться на работу`;
@@ -567,7 +605,7 @@ export function createSim(world, D) {
       if (first) { a.x = goal[0]; a.z = goal[1]; a.path = [goal]; a.pi = 0; a.pk = goal[0].toFixed(2) + ',' + goal[1].toFixed(2); }
       const gk = goal[0].toFixed(2) + ',' + goal[1].toFixed(2);
       let moving = false, arrived = Math.hypot(goal[0] - a.x, goal[1] - a.z) < 0.3 || a.reachedKey === gk + '#done';
-      if (!arrived && setPath(a, goal, !!pl.farm) && a.path && a.path.length) {
+      if (!arrived && setPath(a, goal, !!pl.farm || (a.role === 'farm' && inFarm(a.x, a.z, 0.3))) && a.path && a.path.length) {
         const wp = a.path[a.pi] || goal, dx = wp[0] - a.x, dz = wp[1] - a.z, d = Math.hypot(dx, dz);
         if (d < 0.2) a.pi++;
         else { const st = Math.min(d, a.speed * dt), px = a.x, pz = a.z; a.x += dx / d * st; a.z += dz / d * st; a.rot = Math.atan2(dx, dz); moving = true;
@@ -668,7 +706,7 @@ export function createSim(world, D) {
     const home = own ? (own.done ? 'Свой дом (сруб №' + (own.k + 1) + ')' : `Строит свой дом — готов на ${Math.round((houseObjs.find(o => o.owner === a)?.p || 0) * 100)}%`)
       : `Живёт в шалаше №${(a.hutNo ?? 0) + 1} (${hutOcc[a.hutNo ?? 0] ?? '?'} из ${HUT_CAPACITY} мест занято) · очередь на свой дом: ${q + 1}-й`;
     const dream = c.top ? 'Расширить своё производство и нанять работников' : own && own.done ? (a.female ? 'Завести корову и огород у дома' : 'Открыть свою мастерскую') : 'Построить собственный дом';
-    return { title: a.name, prof: c.title, career: c, coins: coinsW(coins), rawCoins: coins,
+    return { title: a.name, prof: c.title, career: c, coins: coinsW(coins), rawCoins: coins, trait: a.traitName, traitAbout: TRAITS[a.trait].about, life: diary(6, a.i),
       spend: `Хлеб ${BREAD} монеты × 3 раза в день, место в шалаше — 1 монета в день` + (bizList.length ? ', покупки в мастерских' : ''), hungry: a.hungry, days, home, thought: thought(a), energy, satiety, dream, named: a.named };
   }
   let lastHour = 12;
@@ -682,10 +720,13 @@ export function createSim(world, D) {
     for (const a of agents) { p.set(a.x, a.yShown + 0.5, a.z); const d = raycaster.ray.distanceToPoint(p); if (d < bd) { bd = d; best = a; } }
     return best;
   }
+  // где житель может стоять: проходимая клетка; рыбак — у воды; земледелец — на своём поле (и когда уходит с него)
+  const okSpot = a => a.act === 'fish' || nav.passAt(a.x, a.z, false) || (a.role === 'farm' && nav.passAt(a.x, a.z, true));
   const headPos = (a, out) => out.set(a.x, (a.yShown ?? 0) + (a.named ? 1.45 : 1.3), a.z);
   return {
     update: (dt, hour, t) => { lastHour = hour; update(dt, hour, t); },
     stats: () => stats, info, pick, headPos, thought, agents: () => agents,
+    diary, dateOf,
     biz: () => bizList.map((b, j) => ({ key: b.key, shop: BIZ[b.key].shop, why: BIZ[b.key].why, owner: b.owner.name, ownerGen: b.owner.gen, title: titleOf(b.key, b.owner.L || levelOf(0)), day: b.d, x: stalls[j]?.x, z: stalls[j]?.z, agent: b.owner })),
     housesChanged: () => { const c = housesChanged; housesChanged = false; return c; },
     houses: () => houseObjs.map(o => ({ x: o.plot.x, z: o.plot.z, p: o.p, owner: o.owner ? o.owner.gen : '' })),
@@ -694,8 +735,8 @@ export function createSim(world, D) {
     pathStats: () => ({ pathTotal, starved }),
     unreach: () => agents.reduce((s, a) => s + (a.unreach || 0), 0),
     debugSpots: () => ({ parts: nav.parts, reachCells: nav.reach.reduce((a, v) => a + v, 0), hutsBad: agents.filter(a => !nav.passAt(a.hut[0], a.hut[1], false)).length, seatsBad: agents.filter(a => a.seat && !nav.passAt(a.seat[0], a.seat[1], false)).length, dinnerBad: agents.filter(a => !nav.passAt(a.dinner[0], a.dinner[1], false)).length, blockedCells: nav.g.reduce((s, v) => s + (v === 1), 0), cells: nav.g.length }),
-    debugBad: () => agents.filter(a => a.act !== 'farm' && a.act !== 'fish' && !nav.passAt(a.x, a.z, false)).map(a => ({ i: a.i, act: a.act, role: a.role, x: +a.x.toFixed(2), z: +a.z.toFixed(2), goal: a.plan?.goal?.map(v => +v.toFixed(2)), cell: nav.g[nav.idx(a.x, a.z)] })),
-    violations: () => agents.filter(a => !(a.act === 'farm') && !nav.passAt(a.x, a.z, false) && !(a.act === 'fish')).length,
+    debugBad: () => agents.filter(a => !okSpot(a)).map(a => ({ i: a.i, act: a.act, role: a.role, x: +a.x.toFixed(2), z: +a.z.toFixed(2), goal: a.plan?.goal?.map(v => +v.toFixed(2)), cell: nav.g[nav.idx(a.x, a.z)] })),
+    violations: () => agents.filter(a => !okSpot(a)).length,
     agentsDbg: () => agents.map(a => { const g = a.plan?.goal || [a.x, a.z]; return { i: a.i, role: a.role, act: a.act, x: +a.x.toFixed(2), z: +a.z.toFixed(2), tx: +g[0].toFixed(2), tz: +g[1].toFixed(2), hidden: a.hidden, waiting: false, pl: a.path ? a.path.length : -1, pi: a.pi, rk: a.reachedKey === (g[0].toFixed(2) + ',' + g[1].toFixed(2) + '#done'), dwell: a.dwell != null ? +a.dwell.toFixed(1) : null, wd: a.walkDone, unreach: a.unreach || 0 }; }),
   };
 }

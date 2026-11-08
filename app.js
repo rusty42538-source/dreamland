@@ -254,8 +254,9 @@ const TABS = {
     <div class="box"><div class="hint">Просчитай закон до того, как предложить его Думе.</div>
       <select id="simSel" style="margin-top:10px" aria-label="Тип закона">${LAW_TYPES.map((t, i) => `<option value="${i}">${t[0]}</option>`).join('')}</select>
       <div id="simOut"></div></div>
-    <h3>Последнее в летописи</h3>
-    ${[...D.news].reverse().slice(0, 3).map(n => `<div class="box"><div class="sub">${esc(n.date)}</div><div class="hint" style="font-weight:700;color:#2b1a0e">${esc(n.text)}</div></div>`).join('')}`;
+    <h3>Дневник поселения</h3>
+    <div class="box" id="diaryBox">${diaryHtml(6)}</div>
+    <button id="diaryAll" style="width:100%">Весь дневник</button>`;
   },
   state() {
     const { cur, next } = epoch(D.population);
@@ -356,6 +357,7 @@ function devHtml() {
     <div class="hint" style="margin-top:8px">Каждый житель мечтает о своём доме. Дом — это 16 брёвен: двое лесорубов рубят лес, плотники и хозяин строят. Всё платно: хлеб и место в шалаше стоят монет, а монеты даёт только работа. С каждым рабочим днём жители набираются опыта: 10 уровней на каждой из 10 должностей — от новичка до владельца своего производства. Нажми на любого жителя на карте, чтобы узнать, о чём он думает.</div>`;
 }
 setInterval(() => { const el = document.getElementById('devBox'); if (el) el.innerHTML = devHtml(); }, 3000);
+setInterval(() => { const el = document.getElementById('diaryBox'); if (el) el.innerHTML = diaryHtml(6); }, 5000);
 
 // ---------- панель ----------
 let tab = 'now';
@@ -371,6 +373,7 @@ document.querySelectorAll('.nav button').forEach(b => b.onclick = () => (tab ===
 function wire() {
   tickTimer();
   $('okWelcome')?.addEventListener('click', () => { store.set('welcomed', '1'); $('welcome').remove(); });
+  $('diaryAll')?.addEventListener('click', () => showInfo(`<h2>Дневник поселения</h2><div class="sub">Что происходило в ${esc(D.name || 'государстве')}: работа, повышения, новые дела, характеры жителей</div><div class="box">${diaryHtml(80)}</div>`));
   const sel = $('simSel');
   if (sel) { const run = () => {
       const [name, ex, e, note] = LAW_TYPES[+sel.value];
@@ -406,9 +409,20 @@ if (!store.get('mapHint')) {
 }
 
 let shownResident = null;
+// ---------- дневник: события жизни жителей + летопись государства ----------
+function diaryRow(e) { return `<div class="drow"><div class="dt">${esc(e.date)}${e.time ? ' · ' + e.time : ''}</div><div class="dx">${esc(e.text)}</div></div>`; }
+function diaryList(limit) {
+  const life = sim?.diary(limit) || [], MON = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  const news = (D.news || []).map((n, j) => { const t = new Date(n.date + 'T00:00:00Z'); return { d: Math.floor(t / 864e5), date: t.getUTCDate() + ' ' + MON[t.getUTCMonth()], time: '', text: '🏛 ' + n.text, j }; });
+  const base = Math.floor(Date.UTC(2026, 10, 8) / 864e5);
+  return life.map(e => ({ ...e, d: base + e.d, h: +e.time.replace(':', '.') })).concat(news.map(n => ({ ...n, h: -1 + n.j / 1000 })))
+    .sort((p, q) => q.d - p.d || q.h - p.h).slice(0, limit);
+}
+function diaryHtml(limit) { const l = diaryList(limit); return l.length ? l.map(diaryRow).join('') : '<div class="hint">Дневник пока пуст.</div>'; }
 function residentHtml(a) {
   const i = sim.info(a), bar = (v, c) => `<div class="meter" style="height:10px"><i style="width:${v}%;background:${c}"></i></div>`;
   return `${i.named ? `<div class="person" style="padding:0 0 6px"><img src="img/${i.named}.jpg" alt=""><div><b>${esc(i.title)}</b><small>${esc(i.prof)}</small></div></div>` : `<h2>${esc(i.title)}</h2><div class="sub">${esc(i.prof)}</div>`}
+    <div class="box"><div class="lbl">ХАРАКТЕР</div><div class="hint" style="margin-top:4px"><b style="color:#2b1a0e">${esc(i.trait)}</b> — ${esc(i.traitAbout)}</div></div>
     <div class="box"><div class="lbl">МЫСЛИ</div><div class="hint" style="font-weight:800;color:#2b1a0e;font-size:15px;margin-top:4px">💭 ${esc(i.thought)}</div></div>
     <div class="box"><div class="stat" style="grid-template-columns:96px 1fr 40px"><div class="l">Бодрость</div>${bar(i.energy, '#3f9a52')}<div class="v">${i.energy}</div></div>
       <div class="stat" style="grid-template-columns:96px 1fr 40px"><div class="l">Сытость</div>${bar(i.satiety, '#d9a43a')}<div class="v">${i.satiety}</div></div></div>
@@ -419,7 +433,8 @@ function residentHtml(a) {
     <div class="box"><div class="lbl">ДЕНЬГИ</div><div class="hint" style="margin-top:4px">${esc(i.career.money || '')}</div></div>
     <div class="box"><div class="lbl">КОШЕЛЁК</div><div class="hint" style="margin-top:4px;font-size:15px;color:#2b1a0e"><b>💰 ${esc(i.coins)}</b>${i.hungry ? ' · <b style="color:#b5352a">не хватило на хлеб</b>' : ''}</div>
       <div class="hint">${esc(i.spend)}. Деньги даёт только работа.</div></div>
-    <div class="box"><div class="lbl">ЖИЗНЬ</div><div class="hint" style="margin-top:4px">🏠 ${esc(i.home)}<br>⭐ Мечта: ${esc(i.dream)}<br>📅 В поселении: ${i.days} ${plural(i.days, 'день', 'дня', 'дней')}</div></div>`;
+    <div class="box"><div class="lbl">ЖИЗНЬ</div><div class="hint" style="margin-top:4px">🏠 ${esc(i.home)}<br>⭐ Мечта: ${esc(i.dream)}<br>📅 В поселении: ${i.days} ${plural(i.days, 'день', 'дня', 'дней')}</div></div>
+    <div class="box"><div class="lbl">ЛИЧНЫЙ ДНЕВНИК</div>${i.life.length ? i.life.map(diaryRow).join('') : '<div class="hint" style="margin-top:4px">Пока ничего особенного — всё ещё впереди.</div>'}</div>`;
 }
 function showResident(a) { shownResident = a; showInfo(residentHtml(a)); }
 setInterval(() => { if (shownResident && tab === null && !$('panel').classList.contains('closed')) { const st = $('panel').scrollTop; $('body').innerHTML = residentHtml(shownResident); $('panel').scrollTop = st; } else if (tab !== null) shownResident = null; }, 2000);
