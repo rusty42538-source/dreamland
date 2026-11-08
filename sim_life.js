@@ -4,12 +4,12 @@
 // • Опыт: каждый рабочий день даёт опыт (талант у всех разный). 10 уровней на каждой должности,
 //   10 должностей в профессии; последняя — своё производство. Чем выше должность — тем быстрее работа
 //   и выше заработок, а значит больше брёвен, рыбы, урожая и налогов в казну.
-// • Деньги: всё платно — хлеб (3 раза в день) и место в шалаше. Деньги дают только работа.
+// • Деньги: всё платно — хлеб (3 раза в день) и место в шалаше (1 монета в день). Деньги дают только работа.
 //   Без работы монеты кончаются — житель сам устраивается туда, где нужны руки.
 //   Нет денег на хлеб — житель голодает, и работает хуже.
 
 export const FOUND_DAY = Math.floor(Date.UTC(2026, 10, 8, 0, 0) / 864e5);   // 8 ноября 2026
-export const WORK_FROM = 8, WORK_TO = 18;
+export const MORNING = 7.5;   // ночи нет: работа идёт весь день (с перерывами на еду и отдых), утром — найм и новые дела
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function hash(n) { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
 
@@ -25,7 +25,7 @@ export const RANKS = {
 };
 export const PLACE = { wood: 'на лесоповал', fish: 'в рыбацкую артель', farm: 'в поле', build: 'на стройку', cook: 'в пекарню', herbal: 'к травнице', herd: 'на скотный двор', elder: 'в управу' };
 const WAGE = { wood: 12, build: 12, fish: 10, farm: 9, cook: 8, herbal: 9, herd: 10, elder: 11 };   // монет за полный рабочий день
-export const BREAD = 2, BED = 1, MEALS = [7, 13.3, 19.5];   // хлеб — 2 монеты (3 раза в день), место в шалаше — 1 монета за ночь
+export const BREAD = 2, BED = 1, MEALS = [7, 13.3, 19.5];   // хлеб — 2 монеты (3 раза в день), место в шалаше — 1 монета в день
 const HIRE_BELOW = 10, CAP = { farm: 40, fish: 16 };
 
 export const talentOf = i => 0.8 + hash(i + 41) * 0.45;
@@ -67,7 +67,7 @@ export const START_COST = 50;      // столько монет нужно, чт
 const BUY = 0.4, BUY_FROM = 15;    // кто богаче 15 монет, тратит в среднем 0,4 монеты в день в каждой мастерской
 export const ladder = role => RANKS[role] || BIZ[role]?.ranks || null;
 export const titleOf = (role, L) => ladder(role) ? ladder(role)[L.rank] + (L.top ? '' : ` · ${L.lvl} ур.`) : 'Без работы';
-const workFracAt = h => clamp((h - WORK_FROM) / (WORK_TO - WORK_FROM), 0, 1);
+export const workFracAt = h => clamp(h / 24, 0, 1);   // доля прошедшего дня: опыт и добыча копятся круглые сутки
 
 // Лесорубы известны заранее (Тимоша — №3 и житель №7), поэтому брёвна можно посчитать без всей симуляции
 export const WOODCUTTERS = [2, 6];
@@ -91,11 +91,11 @@ export function createLife(spec, tax, houseCost) {
   const free = r => r === 'walk' || r === 'farm' || r === 'fish';   // кто может уйти в своё дело (лесорубы, плотники и именные жители — на своих местах)
   // один день (или его часть до часа h)
   function step(s, d, h) {
-    const f = workFracAt(h), meals = MEALS.filter(m => m <= h).length, night = h >= 22 ? 1 : 0, payday = h >= PAYDAY;
+    const f = workFracAt(h), meals = MEALS.filter(m => m <= h).length, rent = h >= 22 ? 1 : 0, payday = h >= PAYDAY;
     const cnt = { farm: 0, fish: 0 }; s.role.forEach(r => { if (r in cnt) cnt[r]++; });
     let bread = 0; s.hungry.fill(0); s.pay.fill(0); s.paid = payday ? 1 : 0;
     // утро: если появился спрос — самый богатый из простых работников открывает своё дело (не больше одного в день)
-    if (h >= WORK_FROM - 0.5) {
+    if (h >= MORNING) {
       const t = { day: d, grain: s.grain, fish: s.fish, houses: Math.floor(s.logs * (1 - tax) / houseCost), workers: s.role.filter((r, k) => r !== 'walk' && d >= spec[k].join).length, savings: s.coins.reduce((a, b) => a + b, 0) };
       const key = Object.keys(BIZ).find(b => !s.biz.some(x => x.key === b) && BIZ[b].when(t));
       if (key) { let best = -1; for (let k = 0; k < n; k++) if (d >= spec[k].join && free(s.role[k]) && s.coins[k] >= START_COST && (best < 0 || s.coins[k] > s.coins[best])) best = k;
@@ -104,7 +104,7 @@ export function createLife(spec, tax, houseCost) {
     for (let k = 0; k < n; k++) {
       if (d < spec[k].join) continue;
       // утро: денег мало — идёт устраиваться на работу
-      if (s.role[k] === 'walk' && s.coins[k] < HIRE_BELOW && h >= WORK_FROM - 0.5) {
+      if (s.role[k] === 'walk' && s.coins[k] < HIRE_BELOW && h >= MORNING) {
         const r = cnt.farm < CAP.farm ? 'farm' : cnt.fish < CAP.fish ? 'fish' : 'farm'; s.role[k] = r; cnt[r]++; s.hiredDay[k] = d; s.hires.push({ d, k, r });
       }
       for (let j = 0; j < meals; j++) if (s.coins[k] >= BREAD) { s.coins[k] -= BREAD; bread++; } else s.hungry[k] = 1;
@@ -123,7 +123,7 @@ export function createLife(spec, tax, houseCost) {
       for (let k = 0; k < n; k++) if (k !== b.k && d >= spec[k].join && s.coins[k] >= BUY_FROM) { const x = BUY * q; s.coins[k] -= x; sum += x; }
       const t = sum * tax; s.coins[b.k] += sum - t; s.earned[b.k] += sum - t; s.pay[b.k] = sum - t; s.treasury += t; b.sold = Math.round(sum / 2);
     }
-    if (night) for (let k = 0; k < n; k++) if (d >= spec[k].join) { const b = Math.min(BED, s.coins[k]); s.coins[k] -= b; s.treasury += b; }
+    if (rent) for (let k = 0; k < n; k++) if (d >= spec[k].join) { const b = Math.min(BED, s.coins[k]); s.coins[k] -= b; s.treasury += b; }
     const ck = s.role.indexOf('cook');   // хлеб покупают у пекаря: 10% цены — её доход сверх зарплаты (остальное — мука и дрова)
     if (ck >= 0 && payday) { s.coins[ck] += bread * BREAD * 0.1; s.earned[ck] += bread * BREAD * 0.1; s.pay[ck] += bread * BREAD * 0.1; }
   }

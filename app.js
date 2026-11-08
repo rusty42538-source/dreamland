@@ -112,12 +112,6 @@ function buildWorld() {
   cheapMaterials(scene);
   sim = createSim(world, D);
   cheapMaterials(scene); setInterval(() => cheapMaterials(scene), 5000);   // новые дома и стройки тоже
-  // звёзды
-  const n = 700, g = new THREE.BufferGeometry(), a = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) { const th = Math.random() * 6.283, ph = Math.random() * 1.2; a.set([Math.cos(th) * Math.sin(ph) * 300, Math.cos(ph) * 300 + 20, Math.sin(th) * Math.sin(ph) * 300 - 60], i * 3); }
-  g.setAttribute('position', new THREE.BufferAttribute(a, 3));
-  world.stars = new THREE.Points(g, new THREE.PointsMaterial({ color: '#fff8e0', size: 1.4, sizeAttenuation: false, transparent: true, opacity: 0, fog: false }));
-  scene.add(world.stars);
   // гирлянда — появляется, когда счастье высокое
   garland = new THREE.Group(); const cols = ['#ffd27a', '#ff7a5a', '#8fd0ff', '#b8f07a'];
   for (let i = 0; i < 40; i++) { const an = i / 40 * 6.283, x = CAMP.x + Math.cos(an) * 7, z = CAMP.y + Math.sin(an) * 6.3;
@@ -185,35 +179,27 @@ function updatePins() {
     if (vis) p.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
   }
 }
-// день и ночь по Москве
+// московское время (для отладки: ?hour=14&speed=600)
 const T0 = performance.now(), QP = new URLSearchParams(location.search);
 function mskHour() {
   const dbg = QP.get('hour'); if (dbg) return (+dbg + (performance.now() - T0) / 1000 * (+QP.get('speed') || 1) / 3600) % 24;
   const p = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(new Date());
   return +p.find(x => x.type === 'hour').value + +p.find(x => x.type === 'minute').value / 60;
 }
-const C = (a, b, k) => new THREE.Color(a).lerp(new THREE.Color(b), k);
 function skyTex(top, mid, bot) {
   const c = document.createElement('canvas'); c.width = 4; c.height = 256; const x = c.getContext('2d'), gr = x.createLinearGradient(0, 0, 0, 256);
   gr.addColorStop(0, top); gr.addColorStop(0.6, mid); gr.addColorStop(1, bot); x.fillStyle = gr; x.fillRect(0, 0, 4, 256);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
-let skyKey = '', dayPart = '';
+let dayPart = '', skySet = false;
+// ночи нет: в государстве всегда светлый день, часы показывают московское время
 function dayNight() {
-  const h = mskHour(), day = clamp(Math.min((h - 5.5) / 2.5, (21 - h) / 2.5), 0, 1), dusk = day < 1 ? Math.max(0, 1 - Math.abs(day - 0.45) / 0.45) : 0;
-  const { sun, hemi, scene } = world;
-  sun.intensity = 0.45 + 2.2 * day; sun.color.copy(day < 0.15 ? new THREE.Color('#8fa6e8') : C('#ff8a4a', '#ffd9a0', Math.min(1, day * 1.6)));
-  hemi.intensity = 0.6 + 0.6 * day; hemi.color.copy(C('#7d8fd0', '#ffeacc', day)); hemi.groundColor.copy(C('#2a3358', '#5d7a3a', day));
-  world.stars.material.opacity = Math.max(0, 1 - day * 2.2); world.night = 1 - day;
-  const key = Math.round(day * 20) + '_' + Math.round(dusk * 10);
-  if (key !== skyKey) {
-    skyKey = key;
-    scene.background?.dispose?.();
-    scene.background = skyTex(C('#0b1230', '#7fb8e6', day).getStyle(), C(C('#1a2450', '#cfe3ef', day).getStyle(), '#f2a46a', dusk * 0.7).getStyle(), C(C('#2a2440', '#f7dcb0', day).getStyle(), '#ff9d5c', dusk).getStyle());
-    scene.fog.color.copy(C(C('#1c2038', '#efdcb9', day).getStyle(), '#e9a57a', dusk * 0.6));
-  }
+  const h = mskHour(), { sun, hemi, scene } = world;
+  if (!skySet) { skySet = true;
+    sun.intensity = 2.65; sun.color.set('#ffd9a0'); hemi.intensity = 1.2; hemi.color.set('#ffeacc'); hemi.groundColor.set('#5d7a3a');
+    scene.background = skyTex('#7fb8e6', '#cfe3ef', '#f7dcb0'); scene.fog.color.set('#efdcb9'); }
   const hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
-  dayPart = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} МСК, ${day > 0.8 ? 'день' : day > 0.2 ? (h < 12 ? 'рассвет' : 'закат') : 'ночь'}`;
+  dayPart = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} МСК`;
   renderBar();
 }
 
@@ -441,7 +427,7 @@ setInterval(() => { if (shownResident && tab === null && !$('panel').classList.c
 const bubbles = [], bubbleLayer = document.createElement('div'); bubbleLayer.id = 'bubbles'; document.body.appendChild(bubbleLayer);
 function spawnBubble() {
   if (!sim || bubbles.length >= 3) return;
-  const cand = sim.agents().filter(a => !a.hidden && !bubbles.some(b => b.a === a) && a.act !== 'sleep').filter(a => { sim.headPos(a, tmpV).project(camera);
+  const cand = sim.agents().filter(a => !bubbles.some(b => b.a === a)).filter(a => { sim.headPos(a, tmpV).project(camera);
     return tmpV.z < 1 && Math.abs(tmpV.x) < 0.75 && tmpV.y > -0.45 && tmpV.y < 0.6 && camera.position.distanceTo(sim.headPos(a, new THREE.Vector3())) < 40; });
   if (!cand.length) return;
   const a = cand[Math.floor(Math.random() * cand.length)], el = document.createElement('div'); el.className = 'bubble'; el.textContent = sim.thought(a);
@@ -451,7 +437,7 @@ setInterval(spawnBubble, 2600);
 function updateBubbles() {
   const now = performance.now();
   for (let k = bubbles.length - 1; k >= 0; k--) { const b = bubbles[k];
-    if (now > b.until || b.a.hidden) { b.el.remove(); bubbles.splice(k, 1); continue; }
+    if (now > b.until) { b.el.remove(); bubbles.splice(k, 1); continue; }
     sim.headPos(b.a, tmpV).project(camera); const vis = tmpV.z < 1 && Math.abs(tmpV.x) < 1 && Math.abs(tmpV.y) < 1;
     b.el.style.visibility = vis ? 'visible' : 'hidden'; b.el.style.opacity = Math.min(1, (b.until - now) / 500);
     if (vis) b.el.style.transform = `translate(${(tmpV.x + 1) / 2 * innerWidth}px, ${(1 - tmpV.y) / 2 * innerHeight}px) translate(-50%, -100%)`; }
@@ -461,8 +447,7 @@ function liveText() {
   const s = sim?.stats(); if (!s || s.pop == null) return '';
   const p = (n, a, b, c) => n + ' ' + plural(n, a, b, c);
   const parts = [];
-  if (s.sleep) parts.push(p(s.sleep, 'житель спит', 'жителя спят', 'жителей спят'));
-  if (s.fire) parts.push(p(s.fire, 'сидит', 'сидят', 'сидят') + ' у костра');
+  if (s.rest) parts.push(p(s.rest, 'житель отдыхает', 'жителя отдыхают', 'жителей отдыхают') + ' часок после работы');
   if (s.eat) parts.push(p(s.eat, 'житель ест', 'жителя едят', 'жителей едят'));
   if (s.carry) parts.push(p(s.carry, 'несёт', 'несут', 'несут') + (s.building ? ' брёвна на стройку' : ' брёвна к костру'));
   if (s.building && s.build) parts.push(`${p(s.build, 'строит', 'строят', 'строят')} дом ${s.building.owner} (${Math.round(s.building.p * 100)}%)`);
@@ -501,7 +486,6 @@ function loop(now) {
   if (tx !== controls.target.x || tz !== controls.target.z) { camera.position.x += tx - controls.target.x; camera.position.z += tz - controls.target.z; controls.target.x = tx; controls.target.z = tz; }
   world.effects(t * 1.15);
   sim.update(lastDt, mskHour(), t);
-  world.fireLight.intensity *= 1 + 1.4 * (world.night || 0);
   if (garland.visible) garland.children.forEach((b, i) => b.material.color.offsetHSL(0, 0, Math.sin(t * 4 + i) * 0.004));
   crisisSmoke.forEach((s, i) => { if (!s.visible) return; const ph = (t * 0.15 + i / crisisSmoke.length) % 1;
     s.position.set(world.CAMP.x - 6 + Math.sin(ph * 6 + i) * 0.8, 2 + ph * 14, world.CAMP.y - 4 - ph * 3); s.scale.setScalar(0.6 + ph * 2.5); s.material.opacity = 0.55 * (1 - ph); });

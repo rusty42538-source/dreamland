@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { animal, bakeGroup } from './sim_animals.js';
-import { FOUND_DAY, WORK_FROM, WORK_TO, createLife, logsUntil, levelOf, multOf, titleOf, talentOf, RANKS, PLACE, BREAD, MEALS, BIZ, ladder, wageOf, personName, PAYDAY, START_COST } from './sim_life.js';
+import { FOUND_DAY, workFracAt, createLife, logsUntil, levelOf, multOf, titleOf, talentOf, RANKS, PLACE, BREAD, MEALS, BIZ, ladder, wageOf, personName, PAYDAY, START_COST } from './sim_life.js';
 
 const MAX_SHOWN = 700;
 const LUNCH_FROM = 13, LUNCH_TO = 13.7;
@@ -254,16 +254,14 @@ export function createSim(world, D) {
     const res = resByNum.get(i + 1);
     const fem = tplDefs[tpl].female || named === 'marfa' || named === 'nyura';
     agents.push({ i, tpl, role, named, name: named ? names[named] : res ? '@' + res.nick : personName(i, fem).name, gen: named ? gens[named] : res ? '@' + res.nick : personName(i, fem).gen, x: 0, z: 0, tx: 0, tz: 0, path: null, pk: '', speed: 1.1 + hash(i + 3) * 0.45,
-      swing: hash(i + 21) * 7, wake: 6 + hash(i + 7) * 1.0, sleep: 21.3 + hash(i + 8) * 1.4, phase: hash(i + 5) * 6.28, female: tplDefs[tpl].female || named === 'marfa' || named === 'nyura',
-      fireNight: role === 'elder', hidden: false, act: 'walk', wait: 0, stuck: 0 });
+      swing: hash(i + 21) * 7, workLen: 3.5 + hash(i + 7) * 2.5, restOff: hash(i + 8) * 7, phase: hash(i + 5) * 6.28, female: tplDefs[tpl].female || named === 'marfa' || named === 'nyura',
+      act: 'walk', wait: 0, stuck: 0 });
   }
-  const fireN = clamp(Math.round(shown * 0.07), 2, 12);
-  agents.filter(a => a.role === 'walk').sort((p, q) => hash(p.i + 11) - hash(q.i + 11)).slice(0, fireN - 1).forEach(a => a.fireNight = true);
 
   // очередь на собственный дом: сначала именные жители, потом остальные по номеру
   const queue = ['grisha', 'marfa', 'arkadiy', 'timosha', 'nyura'].map(n => agents.find(a => a.named === n)).filter(Boolean)
     .concat(agents.filter(a => !a.named));
-  const builders = agents.filter(a => a.role === 'walk' && !a.fireNight).slice(0, 2);       // двое плотников
+  const builders = agents.filter(a => a.role === 'walk').slice(0, 2);       // двое плотников
   builders.forEach(a => a.role = 'build');
 
   // ---------- жизнь: опыт, должности, деньги (sim_life.js) ----------
@@ -283,7 +281,7 @@ export function createSim(world, D) {
 
   // ---------- экономика: брёвна → дома (детерминированно от времени) ----------
   const economy = (hour) => {
-    const day = today() - FOUND_DAY, workFrac = clamp((hour - WORK_FROM) / (WORK_TO - WORK_FROM), 0, 1);
+    const day = today() - FOUND_DAY, workFrac = workFracAt(hour);
     const L = lifeNow(day, hour);
     const logsAll = L.logs, logs = logsAll * (1 - TAX), done = Math.min(queue.length, plots.length, Math.floor(logs / HOUSE_COST));
     const prog = done < Math.min(queue.length, plots.length) ? (logs % HOUSE_COST) / HOUSE_COST : 0;
@@ -394,8 +392,6 @@ export function createSim(world, D) {
       const hh = huts[h] || { x: CAMP.x + 3, z: CAMP.y }; a.hut = freeNear(...hutDoor(hh)); });
     owners.forEach(a => { a.hutNo = null; a.hut = freeNear(...hutDoor(huts[0] || { x: CAMP.x + 3, z: CAMP.y })); });
     agents.forEach(a => { if (a.house) a.house.door = freeNear(a.house.x, a.house.z); });
-    const watchers = agents.filter(a => a.fireNight);
-    watchers.forEach((a, k) => { const ang = k / watchers.length * 6.283; a.seat = freeNear(CAMP.x + Math.cos(ang) * 2.7, CAMP.y + Math.sin(ang) * 2.7); });
     woodcutters.forEach((a, k) => a.pileSpot = freeNear(pile.x + Math.sin(k * 2.4) * 1.5, pile.z + Math.cos(k * 2.4) * 1.5));
     assignFish();
     stalls.forEach(st => { st.front = freeNear(st.x + Math.sin(st.rot) * 1.0, st.z + Math.cos(st.rot) * 1.0); });
@@ -422,19 +418,7 @@ export function createSim(world, D) {
   const kinds = ['deer', 'deer', 'deer', 'deer', 'fox', 'fox', 'fox', 'boar', 'boar', 'boar', 'hare', 'hare', 'hare', 'hare', 'wolf'];
   const animals = kinds.map((k, i) => { const g = animal(k); g.scale.setScalar(k === 'deer' ? 0.85 : 0.9); g.visible = false; scene.add(g);
     return { g, kind: k, x: 0, z: 0, tx: 0, tz: 0, vis: i % 5 !== 4, placed: false, timer: i % 5 !== 4 ? 60 + Math.random() * 240 : 10 + Math.random() * 30, speed: k === 'hare' ? 2.2 : k === 'fox' || k === 'wolf' ? 1.6 : 1.0 }; });
-  // ---------- «Z z z» над шалашами и домами, где спят ----------
-  const zTex = (() => { const c = document.createElement('canvas'); c.width = 128; c.height = 128; const x = c.getContext('2d');
-    x.font = '900 46px Inter, sans-serif'; x.lineWidth = 8; x.strokeStyle = 'rgba(30,25,60,.85)'; x.fillStyle = '#f4f0ff';
-    [['Z', 18, 112, 1], ['z', 62, 74, 0.8], ['z', 92, 40, 0.6]].forEach(([ch, px, py, k]) => { x.save(); x.translate(px, py); x.scale(k, k); x.strokeText(ch, 0, 0); x.fillText(ch, 0, 0); x.restore(); });
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
-  const zPool = [];
-  function zzz(t, spots) {
-    while (zPool.length < spots.length) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: zTex, transparent: true, depthWrite: false, fog: false })); sp.scale.set(1.5, 1.5, 1); sp.renderOrder = 5; scene.add(sp); zPool.push(sp); }
-    zPool.forEach((sp, k) => { const p = spots[k]; sp.visible = !!p; if (!p) return; const ph = (t * 0.35 + k * 0.37) % 1;
-      sp.position.set(p[0] + ph * 0.5, p[2] + 0.4 + ph * 1.1, p[1]); sp.material.opacity = Math.sin(ph * Math.PI) * 0.95; });
-  }
-
-  // ---------- коровы в загоне: пасутся, жуют траву, ночью лежат ----------
+  // ---------- коровы в загоне: пасутся, жуют траву, иногда ложатся отдохнуть ----------
   const cows = [];
   scene.traverse(o => { if (o.userData.cow) cows.push(o); });
   cows.forEach((g, i) => { const head = g.children.find(o => o.userData.cowHead); g.remove(head);
@@ -443,14 +427,12 @@ export function createSim(world, D) {
     g.userData.st = { head: hp, x: g.position.x, z: g.position.z, tx: g.position.x, tz: g.position.z, rot: g.rotation.y, mode: 'graze', timer: 2 + i * 3, ph: i * 1.7, nod: 0 }; });
   const penSpot = () => { for (let i = 0; i < 20; i++) { const [x, z] = penSpot0(); if (cows.every(o => Math.hypot(o.userData.st.tx - x, o.userData.st.tz - z) > 1.4)) return [x, z]; } return penSpot0(); };
   const penSpot0 = () => { const a = Math.random() * 6.283, r = Math.sqrt(Math.random()); return [pen.x + Math.cos(a) * r * 2.2, pen.y + Math.sin(a) * r * 1.4]; };
-  function cowsUpdate(dt, t, hour) {
-    const night = hour >= 22 || hour < 5.5;
+  function cowsUpdate(dt, t) {
     for (const g of cows) { const c = g.userData.st;
-      if (night) { c.mode = 'lie'; }
-      else if (c.mode === 'lie') { c.mode = 'graze'; c.timer = 3; }
       c.timer -= dt;
-      if (c.mode !== 'lie' && c.timer <= 0) {
-        if (c.mode === 'walk' || Math.random() < 0.5) { c.mode = Math.random() < 0.75 ? 'graze' : 'look'; c.timer = c.mode === 'graze' ? 8 + Math.random() * 12 : 3 + Math.random() * 3; }
+      if (c.timer <= 0) {
+        if (c.mode !== 'lie' && Math.random() < 0.12) { c.mode = 'lie'; c.timer = 25 + Math.random() * 30; }
+        else if (c.mode === 'walk' || c.mode === 'lie' || Math.random() < 0.5) { c.mode = Math.random() < 0.75 ? 'graze' : 'look'; c.timer = c.mode === 'graze' ? 8 + Math.random() * 12 : 3 + Math.random() * 3; }
         else { c.mode = 'walk'; [c.tx, c.tz] = penSpot(); c.timer = 12; } }
       if (c.mode === 'walk') { const dx = c.tx - c.x, dz = c.tz - c.z, d = Math.hypot(dx, dz);
         if (d < 0.1) { c.mode = 'graze'; c.timer = 8 + Math.random() * 10; }
@@ -471,33 +453,39 @@ export function createSim(world, D) {
   const forestSpot = () => { for (let i = 0; i < 60; i++) { const x = -48 + Math.random() * 36, z = -55 + Math.random() * 70;
       if (x < riverX(z) - 6 && Math.hypot(x - CAMP.x, z - CAMP.y) > R + 8 && Math.hypot(x - tree.x, z - tree.z) > 10 && !inFarm(x, z, 8)) return [x, z]; } return [-40, -30]; };
 
+  // ---------- усталость: работает 3,5–6 часов, потом час отдыха (у всех зрителей одинаково) ----------
+  function fatigue(a, h) {
+    const cyc = a.workLen + 1, pos = ((h + a.restOff) % cyc + cyc) % cyc, rest = pos >= a.workLen;
+    return { rest, energy: Math.round(rest ? 25 + 75 * (pos - a.workLen) : 100 - 75 * pos / a.workLen), left: rest ? Math.round((cyc - pos) * 60) : 0 };
+  }
   // ---------- распорядок дня ----------
   function plan(a, h, eco) {
-    const night = h >= 22.5 || h < 6, lunch = h >= LUNCH_FROM && h < LUNCH_TO, work = h >= WORK_FROM && h < WORK_TO && !lunch;
+    // ночи нет: работают весь день, а устав — берут перерыв на 1 час
+    const lunch = h >= LUNCH_FROM && h < LUNCH_TO, breakfast = h >= 7 && h < 7.45, dinner = h >= 19 && h < 20.2;
     const home = a.house && a.house.done && a.house.door ? a.house.door : a.hut;
-    if ((h >= a.sleep || h < a.wake) && !(a.fireNight && night)) return { act: 'sleep', goal: home };
-    if (a.fireNight && night) return { act: 'fire', goal: a.seat };
-    if (h < a.wake + 0.45) return { act: 'eat', goal: home, what: 'Завтракаю у дома' };
+    if (breakfast) return { act: 'eat', goal: home, what: 'Завтракаю у дома' };
     if (lunch) return { act: 'eat', goal: home, what: 'Обед! Купил хлеб у Марфы' };
-    if (h >= 19 && h < 20.2) return { act: 'eat', goal: a.dinner, what: 'Ужинаем все вместе у костра' };
+    if (dinner) return { act: 'eat', goal: a.dinner, what: 'Ужинаем все вместе у костра' };
+    if (fatigue(a, h).rest) return { act: 'rest', goal: home };
+    const work = !lunch;
     const building = houseObjs.find(o => o.p < 1);
     if (work && building && (a.role === 'build' || building.owner === a)) {
       const side = a.role === 'build' ? (builders[0] === a ? 1 : -1) : 0, pl = building.plot;
       const off = side === 0 ? [Math.sin(pl.rot) * 2.3, Math.cos(pl.rot) * 2.3] : [Math.cos(pl.rot) * 2.2 * side, -Math.sin(pl.rot) * 2.2 * side];
       return { act: 'build', goal: freeNear(pl.x + off[0], pl.z + off[1]), face: [pl.x, pl.z] };
     }
-    if (a.role === 'wood' && work && eco.workFrac < 0.97) {
+    if (a.role === 'wood' && eco.workFrac < 0.985) {
       if (a.carry) { const b = houseObjs.find(o => o.p < 1); const g2 = b ? freeNear(b.plot.x - Math.cos(b.plot.rot) * 2.6, b.plot.z + Math.sin(b.plot.rot) * 2.6) : a.pileSpot; return { act: 'carry', goal: g2, to: b ? b.owner : null }; }
       const side = woodcutters[0] === a ? 1 : -1; return { act: 'chop', goal: freeNear(tree.x + side * 0.8, tree.z + 0.85), face: [tree.x, tree.z] };
     }
-    if (BIZ[a.role] && h >= WORK_FROM && h < 19.5 && !lunch) { const j = bizList.findIndex(b => b.owner === a), st = stalls[j];
+    if (BIZ[a.role]) { const j = bizList.findIndex(b => b.owner === a), st = stalls[j];
       if (st && st.front) return { act: 'craft', goal: st.front, face: [st.x, st.z] }; }
-    if (a.role === 'fish' && h >= 7 && h < 20) return { act: 'fish', goal: a.spot };
-    if (a.role === 'farm' && h >= 7 && h < 19) { if (!a.farmGoal || a.farmDone) { a.farmGoal = freeNear(...farm.spot(), true); a.farmDone = false; a.dwell = 4 + Math.random() * 8; } return { act: 'farm', goal: a.farmGoal, farm: true }; }
-    if (a.role === 'herd' && h < 19) { if (!a.herdGoal || a.herdDone) { a.herdGoal = freeNear(pen.x - 4.6 - Math.random() * 1.3, pen.y - 2 + Math.random() * 4); a.herdDone = false; a.dwell = 3 + Math.random() * 5; } return { act: 'herd', goal: a.herdGoal }; }
-    if (a.role === 'cook' && work) return { act: 'cook', goal: freeNear(pile.x + 1.4, pile.z - 1.2), face: [CAMP.x, CAMP.y] };
-    if (a.role === 'herbal' && work) { if (!a.herbGoal || a.herbDone) { a.herbGoal = randomSpot(R + 2); a.herbDone = false; a.dwell = 5 + Math.random() * 6; } return { act: 'herb', goal: a.herbGoal }; }
-    if (!a.walkGoal || a.walkDone) { a.walkGoal = h >= 18 ? randomSpot(9) : randomSpot(); a.walkDone = false; a.dwell = 2 + Math.random() * 8; }
+    if (a.role === 'fish') return { act: 'fish', goal: a.spot };
+    if (a.role === 'farm') { if (!a.farmGoal || a.farmDone) { a.farmGoal = freeNear(...farm.spot(), true); a.farmDone = false; a.dwell = 4 + Math.random() * 8; } return { act: 'farm', goal: a.farmGoal, farm: true }; }
+    if (a.role === 'herd') { if (!a.herdGoal || a.herdDone) { a.herdGoal = freeNear(pen.x - 4.6 - Math.random() * 1.3, pen.y - 2 + Math.random() * 4); a.herdDone = false; a.dwell = 3 + Math.random() * 5; } return { act: 'herd', goal: a.herdGoal }; }
+    if (a.role === 'cook') return { act: 'cook', goal: freeNear(pile.x + 1.4, pile.z - 1.2), face: [CAMP.x, CAMP.y] };
+    if (a.role === 'herbal') { if (!a.herbGoal || a.herbDone) { a.herbGoal = randomSpot(R + 2); a.herbDone = false; a.dwell = 5 + Math.random() * 6; } return { act: 'herb', goal: a.herbGoal }; }
+    if (!a.walkGoal || a.walkDone) { a.walkGoal = randomSpot(); a.walkDone = false; a.dwell = 2 + Math.random() * 8; }
     return { act: 'walk', goal: a.walkGoal };
   }
 
@@ -507,7 +495,7 @@ export function createSim(world, D) {
     const own = a.house, nextOwner = b && b.owner ? b.owner.gen : null;
     const coins = Math.floor(a.coins ?? 0), L = a.L, alt = (Math.floor(Date.now() / 7000) + a.i) % 3 === 0, ranks = ladder(a.role);
     // деньги и карьера
-    if (act !== 'sleep' && act !== 'fire') {
+    if (act !== 'rest') {
       if (a.hungry && coins < BREAD) return ranks ? 'Монет не хватило на хлеб… Работаю — к вечеру будут деньги' : 'Денег нет даже на хлеб. Пора искать работу!';
       if (!ranks && coins < 14) return `Осталось ${coinsW(coins)} — скоро пойду устраиваться на работу`;
       if (!ranks && alt) return `Пока без работы. Живу на сбережения: ${coinsW(coins)}`;
@@ -523,8 +511,7 @@ export function createSim(world, D) {
       if (ranks && alt && coins >= 60) return `Накопил ${coinsW(coins)}. Коплю на своё дело`;
     }
     switch (act) {
-      case 'sleep': return own && own.done ? 'Сплю в своём доме. Тепло!' : 'Сплю… Снится собственный дом';
-      case 'fire': return 'Сторожу костёр, пока все спят';
+      case 'rest': { const f = fatigue(a, lastHour); return `Устал${a.female ? 'а' : ''} — беру перерыв на час. Ещё ${f.left} мин, и снова за работу`; }
       case 'eat': return a.hungry ? 'Не на что купить хлеб — сижу голодный' : (a.plan.what || 'Ем') + ` · хлеб за ${BREAD} монеты`;
       case 'chop': if (TAX && Math.floor(a.phase * 10) % 3 === 0) return TAX_FAIL ? 'Отдать десятое бревно? Спрячу-ка его за пнём…' : 'Каждое десятое бревно — в общий запас';
         return nextOwner ? `Рублю. Ещё пара брёвен — и дом для ${nextOwner} вырастет` : 'Рублю дерево: брёвна нужны всем';
@@ -572,9 +559,8 @@ export function createSim(world, D) {
     const grow = ((((eco.day % 6) + 6) % 6) + hour / 24) / 6;
     { const s2 = 0.25 + 0.75 * Math.min(1, grow * 1.1); if (farm.s2 !== s2) { farm.s2 = s2; farm.crops.forEach(c => { dummy.position.set(c.x, 0.17 + c.h * s2, c.z); dummy.rotation.set(0, c.ry, 0); dummy.scale.setScalar(s2); dummy.updateMatrix(); c.im.setMatrixAt(c.j, dummy.matrix); c.im.instanceMatrix.needsUpdate = true; }); } };
     farm.wheatM.color.setRGB(0.56 + 0.32 * grow, 0.75 - 0.05 * grow, 0.29 - 0.12 * grow);
-    const nightK = hour >= 20 || hour < 6.5 ? 1 : 0; HM.win.emissiveIntensity = nightK * 1.4;
 
-    const cnt = { sleep: 0, fire: 0, chop: 0, carry: 0, build: 0, fish: 0, farm: 0, herd: 0, eat: 0, walk: 0, cook: 0, herb: 0, craft: 0 };
+    const cnt = { rest: 0, chop: 0, carry: 0, build: 0, fish: 0, farm: 0, herd: 0, eat: 0, walk: 0, cook: 0, herb: 0, craft: 0 };
     for (const a of agents) {
       const pl = plan(a, hour, eco); a.plan = pl; a.act = pl.act;
       const goal = pl.goal || [a.x, a.z];
@@ -594,14 +580,12 @@ export function createSim(world, D) {
       if (a.act === 'chop' && arrived) { a.swing += dt * (a.mult || 1); if (a.swing >= 7) { a.swing = 0; a.carry = true; } }
       if (a.act === 'carry' && arrived) a.carry = false;
       if (a.act !== 'chop' && a.act !== 'carry') a.carry = false;
-      a.hidden = a.act === 'sleep' && arrived;
       cnt[a.act] = (cnt[a.act] || 0) + 1;
 
       // ----- поза тела и рук -----
       let y = groundH(a.x, a.z), rx = 0, rz = 0, sy = 1, rot = a.rot ?? 0, armL = 0.08, armR = 0.08, tool = false;
-      const sitting = arrived && (a.act === 'fish' || a.act === 'fire' || a.act === 'eat');
+      const sitting = arrived && (a.act === 'fish' || a.act === 'rest' || a.act === 'eat');
       if (pl.face && arrived) rot = Math.atan2(pl.face[0] - a.x, pl.face[1] - a.z);
-      if (a.act === 'fire' && arrived) rot = Math.atan2(CAMP.x - a.x, CAMP.y - a.z);
       if (a.act === 'eat' && arrived && pl.goal === a.dinner) rot = Math.atan2(CAMP.x - a.x, CAMP.y - a.z);
       if (moving) { const w = Math.sin(t * 9 + a.phase); y += Math.abs(w) * 0.06; rz = w * 0.04; armL = w * 0.6; armR = -w * 0.6;
         if (a.act === 'carry') { armL = armR = -2.7; } }
@@ -617,7 +601,7 @@ export function createSim(world, D) {
       if (a.act === 'fish' && arrived) rot = Math.PI / 2;
       a.rotShown = rot; a.yShown = y;
 
-      const sc = a.hidden ? 0 : (a.named ? 0.62 : 0.55);
+      const sc = a.named ? 0.62 : 0.55;
       V.set(a.x, y, a.z); E.set(rx, rot, rz, 'YXZ'); Q.setFromEuler(E); S.set(sc, sc * sy, sc); M1.compose(V, Q, S);
       bodies[a.tpl].setMatrixAt(a.slot, M1);
       const ta = tplArm[a.tpl];
@@ -628,26 +612,22 @@ export function createSim(world, D) {
       // инструмент (топор/молоток) в правой руке
       V.set(ta.sx * ta.k, ta.sy * ta.k, 0); E.set(armR, 0, 0.14, 'XYZ'); Q.setFromEuler(E); S.set(1, 1, 1); M2.compose(V, Q, S);
       M3.makeTranslation(0, -0.64 * ta.k, 0); M2.multiply(M3); M3.makeRotationX(Math.PI / 2); M2.multiply(M3); M3.multiplyMatrices(M1, M2);
-      if (!tool || a.hidden) M3.makeScale(0, 0, 0); tools.setMatrixAt(a.i, M3);
-      dummy.position.set(a.x, groundH(a.x, a.z) + 0.04, a.z); dummy.rotation.set(0, 0, 0); dummy.scale.setScalar(a.hidden ? 0 : (a.named ? 1.1 : 1)); dummy.updateMatrix(); blobs.setMatrixAt(a.i, dummy.matrix);
-      if (a.role === 'wood') { const k = woodcutters.indexOf(a), show = a.act === 'carry' && !a.hidden;
+      if (!tool) M3.makeScale(0, 0, 0); tools.setMatrixAt(a.i, M3);
+      dummy.position.set(a.x, groundH(a.x, a.z) + 0.04, a.z); dummy.rotation.set(0, 0, 0); dummy.scale.setScalar(a.named ? 1.1 : 1); dummy.updateMatrix(); blobs.setMatrixAt(a.i, dummy.matrix);
+      if (a.role === 'wood') { const k = woodcutters.indexOf(a), show = a.act === 'carry';
         dummy.position.set(a.x, y + 0.82, a.z); dummy.rotation.set(0, rot, Math.PI / 2, 'YXZ'); dummy.scale.setScalar(show ? 1 : 0); dummy.updateMatrix(); carryLogs.setMatrixAt(k, dummy.matrix); }
-      if (a.rod) { a.rod.visible = a.act === 'fish' && arrived && !a.hidden; if (a.rod.visible) { a.rod.position.set(a.x + 1.0, y + 0.85, a.z); a.rod.rotation.set(0, 0, -1.05 + Math.sin(t * 1.3 + a.phase) * 0.04); } }
+      if (a.rod) { a.rod.visible = a.act === 'fish' && arrived; if (a.rod.visible) { a.rod.position.set(a.x + 1.0, y + 0.85, a.z); a.rod.rotation.set(0, 0, -1.05 + Math.sin(t * 1.3 + a.phase) * 0.04); } }
     }
     bodies.forEach(m => m && (m.instanceMatrix.needsUpdate = true));
     [sleeves, hands, blobs, carryLogs, tools].forEach(m => m.instanceMatrix.needsUpdate = true);
 
-    cowsUpdate(dt, t, hour);
-    { const sp = new Map(); for (const a of agents) if (a.hidden) { const home = a.house && a.house.done ? a.house : a.hutNo != null ? huts[a.hutNo] : null;
-        if (home && !sp.has(home)) sp.set(home, [home.x, home.z, groundH(home.x, home.z) + (home === a.house ? 3.4 : 3.0)]); }
-      zzz(t, [...sp.values()]); }
+    cowsUpdate(dt, t);
     // звери
-    const night = hour >= 22.5 || hour < 6;
     for (const an of animals) {
       an.timer -= dt;
       if (an.timer <= 0) { an.vis = !an.vis; an.timer = an.vis ? 150 + Math.random() * 200 : 15 + Math.random() * 40; if (an.vis) an.placed = false; }
       if (an.vis && !an.placed) { an.placed = true; [an.x, an.z] = forestSpot(); [an.tx, an.tz] = forestSpot(); }
-      an.g.visible = an.vis && !(night && an.kind === 'hare');
+      an.g.visible = an.vis;
       if (!an.vis) continue;
       let dx = an.tx - an.x, dz = an.tz - an.z, d = Math.hypot(dx, dz);
       if (d < 0.5 || Math.hypot(an.tx - CAMP.x, an.tz - CAMP.y) < R + 8) { [an.tx, an.tz] = forestSpot(); continue; }
@@ -681,7 +661,7 @@ export function createSim(world, D) {
   }
   function info(a) {
     const days = Math.max(1, lastEco.day - (a.join || 0) + 1);
-    const h = lastHour, energy = a.act === 'sleep' ? 100 : Math.round(clamp(100 - (h - a.wake) / (a.sleep - a.wake) * 70, 20, 100));
+    const h = lastHour, energy = fatigue(a, h).energy;
     const meals = MEALS.filter(m => m <= h), since = h - (meals.at(-1) ?? (h + 24 - 19.5 - 24));
     const satiety = Math.round(clamp((a.hungry ? 55 : 100) - since * 14, 5, 100));
     const q = queue.indexOf(a), own = a.house, c = career(a), coins = Math.floor(a.coins ?? 0);
@@ -689,17 +669,17 @@ export function createSim(world, D) {
       : `Живёт в шалаше №${(a.hutNo ?? 0) + 1} (${hutOcc[a.hutNo ?? 0] ?? '?'} из ${HUT_CAPACITY} мест занято) · очередь на свой дом: ${q + 1}-й`;
     const dream = c.top ? 'Расширить своё производство и нанять работников' : own && own.done ? (a.female ? 'Завести корову и огород у дома' : 'Открыть свою мастерскую') : 'Построить собственный дом';
     return { title: a.name, prof: c.title, career: c, coins: coinsW(coins), rawCoins: coins,
-      spend: `Хлеб ${BREAD} монеты × 3 раза в день, место в шалаше — 1 монета за ночь` + (bizList.length ? ', покупки в мастерских' : ''), hungry: a.hungry, days, home, thought: thought(a), energy, satiety, dream, named: a.named };
+      spend: `Хлеб ${BREAD} монеты × 3 раза в день, место в шалаше — 1 монета в день` + (bizList.length ? ', покупки в мастерских' : ''), hungry: a.hungry, days, home, thought: thought(a), energy, satiety, dream, named: a.named };
   }
   let lastHour = 12;
   const raycaster = new THREE.Raycaster();
   function pick(ndc, camera) {
     raycaster.setFromCamera(ndc, camera);
     const hits = raycaster.intersectObjects(bodies.filter(Boolean), false);
-    for (const h of hits) { const a = byTpl[h.object.userData.tpl][h.instanceId]; if (a && !a.hidden) return a; }
+    for (const h of hits) { const a = byTpl[h.object.userData.tpl][h.instanceId]; if (a) return a; }
     // промах по пикселю — берём ближайшего к лучу жителя
     let best = null, bd = 0.9; const o = raycaster.ray.origin, dir = raycaster.ray.direction, p = new THREE.Vector3();
-    for (const a of agents) { if (a.hidden) continue; p.set(a.x, a.yShown + 0.5, a.z); const d = raycaster.ray.distanceToPoint(p); if (d < bd) { bd = d; best = a; } }
+    for (const a of agents) { p.set(a.x, a.yShown + 0.5, a.z); const d = raycaster.ray.distanceToPoint(p); if (d < bd) { bd = d; best = a; } }
     return best;
   }
   const headPos = (a, out) => out.set(a.x, (a.yShown ?? 0) + (a.named ? 1.45 : 1.3), a.z);
@@ -714,8 +694,8 @@ export function createSim(world, D) {
     pathStats: () => ({ pathTotal, starved }),
     unreach: () => agents.reduce((s, a) => s + (a.unreach || 0), 0),
     debugSpots: () => ({ parts: nav.parts, reachCells: nav.reach.reduce((a, v) => a + v, 0), hutsBad: agents.filter(a => !nav.passAt(a.hut[0], a.hut[1], false)).length, seatsBad: agents.filter(a => a.seat && !nav.passAt(a.seat[0], a.seat[1], false)).length, dinnerBad: agents.filter(a => !nav.passAt(a.dinner[0], a.dinner[1], false)).length, blockedCells: nav.g.reduce((s, v) => s + (v === 1), 0), cells: nav.g.length }),
-    debugBad: () => agents.filter(a => !a.hidden && a.act !== 'farm' && a.act !== 'fish' && !nav.passAt(a.x, a.z, false)).map(a => ({ i: a.i, act: a.act, role: a.role, x: +a.x.toFixed(2), z: +a.z.toFixed(2), goal: a.plan?.goal?.map(v => +v.toFixed(2)), cell: nav.g[nav.idx(a.x, a.z)] })),
-    violations: () => agents.filter(a => !a.hidden && !(a.act === 'farm') && !nav.passAt(a.x, a.z, false) && !(a.act === 'fish')).length,
+    debugBad: () => agents.filter(a => a.act !== 'farm' && a.act !== 'fish' && !nav.passAt(a.x, a.z, false)).map(a => ({ i: a.i, act: a.act, role: a.role, x: +a.x.toFixed(2), z: +a.z.toFixed(2), goal: a.plan?.goal?.map(v => +v.toFixed(2)), cell: nav.g[nav.idx(a.x, a.z)] })),
+    violations: () => agents.filter(a => !(a.act === 'farm') && !nav.passAt(a.x, a.z, false) && !(a.act === 'fish')).length,
     agentsDbg: () => agents.map(a => { const g = a.plan?.goal || [a.x, a.z]; return { i: a.i, role: a.role, act: a.act, x: +a.x.toFixed(2), z: +a.z.toFixed(2), tx: +g[0].toFixed(2), tz: +g[1].toFixed(2), hidden: a.hidden, waiting: false, pl: a.path ? a.path.length : -1, pi: a.pi, rk: a.reachedKey === (g[0].toFixed(2) + ',' + g[1].toFixed(2) + '#done'), dwell: a.dwell != null ? +a.dwell.toFixed(1) : null, wd: a.walkDone, unreach: a.unreach || 0 }; }),
   };
 }
