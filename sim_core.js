@@ -571,7 +571,7 @@ export function createSim(world, D) {
     const own = a.house, nextOwner = b && b.owner ? b.owner.gen : null;
     const coins = Math.floor(a.coins ?? 0), L = a.L, alt = (Math.floor(Date.now() / 7000) + a.i) % 3 === 0, ranks = ladder(a.role);
     if (act === 'sick') return clinic ? (a.sick === 2 ? 'Заболел. В лечебнице уже занимаются мной — к обеду встану' : 'Заболел. В лечебнице очередь, лекарь не успевает…') : (a.sick === 2 ? 'Заболел. Баба Нюра придёт на дом — к обеду встану' : 'Слёг с простудой. Лекарь одна, а больных много…');
-    if (act === 'heal') return clinic ? 'Принимаю больных в лечебнице: теперь успеваю больше' : `Лечебницы нет — хожу по домам${a.healTo ? ', иду к ' + a.healTo.gen : ''}. Здание строить не нужно, лечу так`;
+    if (act === 'heal') return clinic ? 'Принимаю больных в лечебнице: теперь успеваю больше' : `Лечебницы нет — хожу по домам${a.healTo ? ', сейчас у меня на очереди: ' + a.healTo.name : ''}. Здание строить не нужно, лечу так`;
     if (act === 'shopbuild') { const m = bizList.find(b => b.owner === a); return m ? `Строю ${BUILD[m.key].what}: готово на ${Math.round(m.p * 100)}%. Брёвна купил на свои деньги (${coinsW(m.paid)})` : 'Строю своё дело'; }
     // деньги и карьера
     // характер
