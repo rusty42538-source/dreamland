@@ -82,7 +82,8 @@ function fault(text, detail = '', quiet = false) {
 addEventListener('error', e => { if (/app\.js|sim_|world\.js/.test(e.filename || '')) fault('Что-то пошло не так.', `${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`); });
 addEventListener('unhandledrejection', e => fault('Что-то пошло не так.', String(e.reason?.message || e.reason)));
 const DATA_URL = './' + (new URLSearchParams(location.search).get('data') || 'data.json').replace(/[^\w.-]/g, '');
-const loadData = async () => (await fetch(DATA_URL + '?ts=' + Date.now(), { cache: 'no-store' })).json();
+// без «?ts=»: тогда адрес одинаковый у всех, и данные отдаёт кэш сети (CDN), а не сам GitHub; 'no-cache' — браузер лишь спрашивает «изменилось?» и получает короткий ответ 304
+const loadData = async () => (await fetch(DATA_URL, { cache: 'no-cache' })).json();
 
 function mergeStatic(scene) {
   scene.updateMatrixWorld(true);
@@ -529,13 +530,14 @@ D = await loadData();
 buildWorld(); dayNight(); renderAlert(); showTab('now');
 setInterval(tickTimer, 1000); setInterval(dayNight, 30000);
 setInterval(async () => {
+  if (document.hidden) return;   // вкладка не на виду — не спрашиваем (данные меняются раз в 4 часа)
   try {
     const d = await loadData();
     if (JSON.stringify(d) === JSON.stringify(D)) return;
     if (JSON.stringify({ population: d.population, name: d.name || '', ...d.world, noCrowd: true, huts: hutsNeeded(d.population, housesDoneAt(mskHour(), taxRateOf(d))) }) !== worldKey) { location.reload(); return; }
     D = d; renderBar(); renderAlert(); buildPins(); if (tab) { const st = $('panel').scrollTop; const open = !$('panel').classList.contains('closed'); showTab(tab); $('panel').scrollTop = st; togglePanel(open); }
   } catch {}
-}, 60000);
+}, 300000);   // раз в 5 минут, а не раз в минуту
 window.__cam = () => camera; window.__fly = (x, z, d) => { const T = new THREE.Vector3(x, 0.5, z); flight = { t0: performance.now(), fromP: camera.position.clone(), fromT: controls.target.clone(), toT: T, toP: T.clone().add(new THREE.Vector3(0.4, 0.75, 0.55).setLength(d)) }; }; window.__sim = () => sim;
 window.__dbg = () => ({ t: controls.target.toArray().map(v => +v.toFixed(2)), p: camera.position.toArray().map(v => +v.toFixed(1)) });
 loop();
