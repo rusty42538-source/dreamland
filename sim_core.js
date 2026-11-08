@@ -567,6 +567,15 @@ export function createSim(world, D) {
   }
 
   // мысли жителя — по его делам, дому и состоянию поселения
+  // фирменная мысль характера (бунтарь возмущается налогом, хитрец ищет лазейку и т.д.)
+  function charThought(a) {
+    const T = { grump: TAX ? 'Опять этот налог… Ворчу, но работаю честно' : 'Всё не так, всё не эдак! Но работать надо',
+      rebel: TAX ? 'Долой налог! Напишу в Думу свой закон' : 'Никто мне не указ! Сам решаю, как жить',
+      merry: 'Слыхали, как Гришина корова Марфу обогнала? Ха-ха!', dreamer: BIZ[a.role] ? 'Моя мастерская — только начало. Мечтаю о целом заводе!' : `Мечтаю о своём деле. Коплю на брёвна для здания`,
+      lazy: 'Эх, поскорее бы перерыв…', hard: 'Работа не волк — а я её люблю!', sly: TAX ? 'Если никто не видит — налог можно заплатить и поменьше…' : 'Где бы урвать выгоду?',
+      kind: 'Если кто-то голоден — поделюсь хлебом', generous: 'Вечером зайду в мастерские — люблю красивые вещи', stingy: 'Каждая монета на счету. Коплю!' };
+    return T[a.trait];
+  }
   function thought(a) {
     const e = lastEco, b = houseObjs.find(o => o.p < 1), q = queue.indexOf(a), act = a.act;
     const own = a.house, nextOwner = b && b.owner ? b.owner.gen : null;
@@ -576,14 +585,7 @@ export function createSim(world, D) {
     if (act === 'shopbuild') { const m = bizList.find(b => b.owner === a); return m ? `Строю ${BUILD[m.key].what}: готово на ${Math.round(m.p * 100)}%. Брёвна купил на свои деньги (${coinsW(m.paid)})` : 'Строю своё дело'; }
     // деньги и карьера
     // характер
-    if (act !== 'rest' && act !== 'eat' && (Math.floor(Date.now() / 9000) + a.i) % 4 === 0) {
-      const T = { grump: TAX ? 'Опять этот налог… Ворчу, но работаю честно' : 'Всё не так, всё не эдак! Но работать надо',
-        rebel: TAX ? 'Долой налог! Напишу в Думу свой закон' : 'Никто мне не указ! Сам решаю, как жить',
-        merry: 'Слыхали, как Гришина корова Марфу обогнала? Ха-ха!', dreamer: BIZ[a.role] ? 'Моя мастерская — только начало. Мечтаю о целом заводе!' : `Мечтаю о своём деле. Коплю на брёвна для здания`,
-        lazy: 'Эх, поскорее бы перерыв…', hard: 'Работа не волк — а я её люблю!', sly: TAX ? 'Если никто не видит — налог можно заплатить и поменьше…' : 'Где бы урвать выгоду?',
-        kind: 'Если кто-то голоден — поделюсь хлебом', generous: 'Вечером зайду в мастерские — люблю красивые вещи', stingy: 'Каждая монета на счету. Коплю!' };
-      return T[a.trait];
-    }
+    if (act !== 'rest' && act !== 'eat' && (Math.floor(Date.now() / 9000) + a.i) % 4 === 0) return charThought(a);
     if (act !== 'rest') {
       if (a.hungry && coins < BREAD) return ranks ? 'Монет не хватило на хлеб… Работаю — к вечеру будут деньги' : 'Денег нет даже на хлеб. Пора искать работу!';
       if (!ranks && coins < 14) return `Осталось ${coinsW(coins)} — скоро пойду устраиваться на работу`;
@@ -780,7 +782,7 @@ export function createSim(world, D) {
   const headPos = (a, out) => out.set(a.x, (a.yShown ?? 0) + (a.named ? 1.45 : 1.3), a.z);
   return {
     update: (dt, hour, t) => { lastHour = hour; update(dt, hour, t); },
-    stats: () => stats, info, pick, headPos, thought, agents: () => agents,
+    stats: () => stats, info, pick, headPos, thought, charThought, agents: () => agents,
     diary, dateOf,
     biz: () => bizList.map((b, j) => ({ key: b.key, state: b.state, p: b.p, shop: BIZ[b.key].shop, why: BIZ[b.key].why, what: BUILD[b.key].what, mats: b.mats, paid: b.paid, owner: b.owner.name, ownerGen: b.owner.gen, title: titleOf(b.key, b.owner.L || levelOf(0)), day: b.d, ready: b.ready, x: shops[j]?.x, z: shops[j]?.z, agent: b.owner })),
     housesChanged: () => { const c = housesChanged; housesChanged = false; return c; },

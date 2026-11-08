@@ -31,7 +31,7 @@ function at(obj, x, y, z) { obj.position.set(x, y, z); return obj; }
 
 // ---------- renderer / scene ----------
 const SITE = typeof window !== 'undefined' && window.WORLD_SITE;
-const renderer = new THREE.WebGLRenderer({ antialias: !SITE, preserveDrawingBuffer: !SITE, powerPreference: SITE ? 'high-performance' : 'default' });
+const renderer = new THREE.WebGLRenderer({ antialias: !SITE || !!window.WORLD_VIDEO, preserveDrawingBuffer: !SITE || !!window.WORLD_VIDEO, powerPreference: SITE ? 'high-performance' : 'default' });
 renderer.setPixelRatio(1);
 renderer.setSize(W, H);
 renderer.shadowMap.enabled = true;
