@@ -139,9 +139,10 @@ function doneHouse() {
       ge.setAttribute('color', new THREE.BufferAttribute(col, 3)); parts.push(ge); });
     doneGeo = mergeGeometries(parts, false); }
   const g = new THREE.Group(), m = new THREE.Mesh(doneGeo, doneMat); m.castShadow = true; m.receiveShadow = true; g.add(m);
-  for (const sx of [-1, 1]) { const w = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.36, 0.06), HM.win); w.position.set(sx * 0.95, 1.25, 2.4 / 2 + 0.12); g.add(w); }
+  for (const sx of [-1, 1]) { const w = new THREE.Mesh(WIN_GEO, HM.win); w.position.set(sx * 0.95, 1.25, 2.4 / 2 + 0.12); g.add(w); }
   return g;
 }
+const WIN_GEO = new THREE.BoxGeometry(0.42, 0.36, 0.06);   // одна геометрия окна на все дома
 
 export const HUT_CAPACITY = 20;
 export const taxRateOf = D => { const l = (D.laws || []).find(x => x.policy === 'tax10' && !x.veto); return l ? 0.1 : 0; };
@@ -321,7 +322,7 @@ export function createSim(world, D) {
 
   // ---------- дома на карте ----------
   const houseObjs = [];       // { k, owner, plot, stage, obj }
-  let housesKey = '';
+  let housesKey = '', housesCount = '';       // что на карте сейчас: стадия стройки и число домов (по отдельности — чтобы не перестраивать дома каждый кадр)
   const houseObs = [];
   // ---------- мастерские: навес, прилавок и товар своего цвета ----------
   const stallObs = [], stalls = [];
@@ -352,8 +353,8 @@ export function createSim(world, D) {
   function syncHouses(eco) {
     const key = eco.done + ':' + Math.floor(eco.prog * 20);
     if (key === housesKey) return false;
-    const countKey = eco.done + (eco.prog > 0 ? 1 : 0), countChanged = !housesKey || housesKey.split(':')[2] !== String(countKey); housesKey = key + ':' + countKey;
-    for (const h of houseObjs) scene.remove(h.obj);
+    const countKey = String(eco.done + (eco.prog > 0 ? 1 : 0)), countChanged = countKey !== housesCount; housesKey = key; housesCount = countKey;
+    for (const h of houseObjs) { scene.remove(h.obj); if (h.p < 1) h.obj.traverse(o => o.geometry?.dispose()); }   // стройка — у неё свои геометрии, готовый дом использует общую
     houseObjs.length = 0; houseObs.length = 0;
     const count = eco.done + (eco.prog > 0 ? 1 : 0);
     for (let k = 0; k < count; k++) {
@@ -586,7 +587,7 @@ export function createSim(world, D) {
     dt = Math.min(dt, 0.1); pathBudget = first ? 99999 : 12; pathCalls = 0; pathT0 = first ? Infinity : performance.now();
     const dn = today(), eco = economy(hour); lastEco = eco;
     if (rolesChanged) { rolesChanged = false; assignFish(); }
-    if (dn !== dayKey) { dayKey = dn; [tree.x, tree.z] = treeSpot(dn); tree.t.position.set(tree.x, groundH(tree.x, tree.z), tree.z); treeOb.x = tree.x; treeOb.z = tree.z; housesKey = ''; }
+    if (dn !== dayKey) { dayKey = dn; [tree.x, tree.z] = treeSpot(dn); tree.t.position.set(tree.x, groundH(tree.x, tree.z), tree.z); treeOb.x = tree.x; treeOb.z = tree.z; housesKey = housesCount = ''; }
     const hc = syncHouses(eco);
     const sc = syncStalls();
     if (hc === 'count' || first || sc) { rebuildNav(); placeFixedSpots(); agents.forEach(a => { a.pk = ''; }); }
