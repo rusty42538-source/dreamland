@@ -295,7 +295,8 @@ export function createSim(world, D) {
     const a = agents[e.k];
     switch (e.t) {
       case 'hire': return `${who(a)} устроил${a.female ? 'ась' : 'ся'} на работу ${PLACE[e.r]}: монеты кончились, а хлеб платный`;
-      case 'promo': return `${whoT(a)} получил${ending(a)} повышение — теперь ${ladder(e.role)[e.rank]}${firstPromo(e) ? ' — перв' + (a.female ? 'ая' : 'ый') + ' в государстве!' : ''}${a.trait === 'hard' ? '. Трудолюбие окупается!' : a.trait === 'lazy' ? '. Хоть и не спешил' + ending(a) + '…' : ''}`;
+      case 'promo': { const fp = firstPromo(e), tail = a.trait === 'hard' ? 'Трудолюбие окупается!' : a.trait === 'lazy' ? 'Хоть и не спешил' + ending(a) + '…' : '';
+        return `${whoT(a)} получил${ending(a)} повышение — теперь ${ladder(e.role)[e.rank]}${fp ? ' — перв' + (a.female ? 'ая' : 'ый') + ' в государстве!' : ''}${tail ? (fp ? ' ' : '. ') + tail : ''}`; }
       case 'mats': return `${a.trait === 'dreamer' ? whoT(a) : who(a)} купил${ending(a)} ${e.n} ${plural(e.n, 'бревно', 'бревна', 'брёвен')} у лесорубов за ${coinsW(e.price)} и начал${ending(a)} строить ${BUILD[e.key].what}`;
       case 'heal': { const b = agents[e.to]; return `Баба Нюра вылечила ${whom(b)}: заболел${b.female ? 'а' : ''} ${e.clinic ? '— принята в лечебнице' : '— лекарь пришла на дом, лечебницы пока нет'}`; }
       case 'biz': return `Построена ${BIZ[e.key].shop.toLowerCase()}! ${a.trait === 'dreamer' ? whoT(a) : who(a)} открыл${ending(a)} своё дело: ${BIZ[e.key].why}`;
