@@ -156,5 +156,11 @@
     "health": 60,
     "order": 50,
     "happy": 50
-  }
+  },
+  "popHistory": [
+    {
+      "date": "2026-11-08",
+      "pop": 135
+    }
+  ]
 }

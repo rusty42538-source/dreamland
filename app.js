@@ -364,7 +364,8 @@ function devHtml() {
   const s = sim?.stats(); if (!s?.eco) return '…'; const e = s.eco;
   const busy = (s.hutOcc || []).reduce((x, v) => x + v, 0);
   return `<div class="hint">⛺ Шалашей: <b>${s.huts}</b> · по ${s.hutCap} мест · живут <b>${busy}</b> из ${s.huts * s.hutCap}<br>🪵 Заготовлено брёвен: <b>${e.logs}</b><br>🏠 Построено своих домов: <b>${e.done}</b>${s.building ? `<br>🔨 Сейчас строится дом ${esc(s.building.owner)} — <b>${Math.round(s.building.p * 100)}%</b>` : ''}${e.tax ? `<br>🏛 Государственный запас (закон №1): <b>${e.reserve.logs}</b> брёвен, <b>${e.reserve.fish}</b> рыбы${e.tax < 0.1 ? ' — собрана лишь малая часть: жители прячут добычу' : ''}` : ''}<br>🐟 Поймано рыбы: <b>${e.fish}</b><br>🌾 Собрано урожаев: <b>${e.harvests}</b></div>
-    <div class="hint" style="margin-top:8px">Каждый житель мечтает о своём доме. Дом — это 16 брёвен: двое лесорубов рубят по дереву в день, плотники и хозяин строят. Нажми на любого жителя на карте, чтобы узнать, о чём он думает.</div>`;
+    ${s.life ? `<div class="hint" style="margin-top:8px">💰 Казна: <b>${e.treasury}</b> монет${e.tax ? ' (налог 10% с заработка + плата за места в шалашах)' : ' (плата за места в шалашах)'}<br>🎖 Мастеров и выше: <b>${s.life.masters}</b> — чем их больше, тем быстрее растут запасы и казна<br>${s.life.best ? `🏆 Самый опытный: ${esc(s.life.best.who)} — ${esc(s.life.best.title)}<br>` : ''}🧑‍🌾 Без работы: <b>${s.life.jobless}</b>${s.life.hiredToday ? ` · сегодня устроились на работу: <b>${s.life.hiredToday}</b>` : ''}<br>🍞 Средний кошелёк: <b>${s.life.avgCoins}</b> монет${s.life.hungry ? ` · не хватило на хлеб: <b>${s.life.hungry}</b>` : ''}</div>` : ''}
+    <div class="hint" style="margin-top:8px">Каждый житель мечтает о своём доме. Дом — это 16 брёвен: двое лесорубов рубят лес, плотники и хозяин строят. Всё платно: хлеб и место в шалаше стоят монет, а монеты даёт только работа. С каждым рабочим днём жители набираются опыта: 10 уровней на каждой из 10 должностей — от новичка до владельца своего производства. Нажми на любого жителя на карте, чтобы узнать, о чём он думает.</div>`;
 }
 setInterval(() => { const el = document.getElementById('devBox'); if (el) el.innerHTML = devHtml(); }, 3000);
 
@@ -423,6 +424,12 @@ function residentHtml(a) {
     <div class="box"><div class="lbl">МЫСЛИ</div><div class="hint" style="font-weight:800;color:#2b1a0e;font-size:15px;margin-top:4px">💭 ${esc(i.thought)}</div></div>
     <div class="box"><div class="stat" style="grid-template-columns:96px 1fr 40px"><div class="l">Бодрость</div>${bar(i.energy, '#3f9a52')}<div class="v">${i.energy}</div></div>
       <div class="stat" style="grid-template-columns:96px 1fr 40px"><div class="l">Сытость</div>${bar(i.satiety, '#d9a43a')}<div class="v">${i.satiety}</div></div></div>
+    <div class="box"><div class="lbl">РАБОТА И ОПЫТ</div>
+      ${i.career.rankNo ? `<div class="stat" style="grid-template-columns:96px 1fr 40px;margin-top:6px"><div class="l">Опыт</div>${bar(Math.round(i.career.frac * 100), '#2f5fa8')}<div class="v">${Math.round(i.career.frac * 100)}%</div></div>
+      <div class="ranks" aria-label="Должность ${i.career.rankNo} из 10">${Array.from({ length: 10 }, (_, k) => `<i class="${k < i.career.rankNo ? 'on' : ''}"></i>`).join('')}</div>` : ''}
+      <div class="hint" style="margin-top:4px">${esc(i.career.line)}${i.career.speed ? `<br>⚡ Работает на ${i.career.speed}% быстрее новичка` : ''}</div></div>
+    <div class="box"><div class="lbl">КОШЕЛЁК</div><div class="hint" style="margin-top:4px;font-size:15px;color:#2b1a0e"><b>💰 ${esc(i.coins)}</b>${i.hungry ? ' · <b style="color:#b5352a">не хватило на хлеб</b>' : ''}</div>
+      <div class="hint">${esc(i.spend)}. Деньги даёт только работа.</div></div>
     <div class="box"><div class="lbl">ЖИЗНЬ</div><div class="hint" style="margin-top:4px">🏠 ${esc(i.home)}<br>⭐ Мечта: ${esc(i.dream)}<br>📅 В поселении: ${i.days} ${plural(i.days, 'день', 'дня', 'дней')}</div></div>`;
 }
 function showResident(a) { shownResident = a; showInfo(residentHtml(a)); }

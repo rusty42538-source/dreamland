@@ -8,11 +8,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { animal, bakeGroup } from './sim_animals.js';
+import { FOUND_DAY, WORK_FROM, WORK_TO, createLife, logsUntil, levelOf, multOf, titleOf, talentOf, RANKS, PLACE, BREAD, MEALS } from './sim_life.js';
 
 const MAX_SHOWN = 700;
-const WORK_FROM = 8, WORK_TO = 18, LUNCH_FROM = 13, LUNCH_TO = 13.7;
-const FOUND_DAY = Math.floor(Date.UTC(2026, 10, 8, 0, 0) / 864e5);   // 8 ноября 2026 — первый рабочий день
-const LOGS_PER_DAY = 8, HOUSE_COST = 16;                              // 2 лесоруба: 8 брёвен в день, дом — 16 брёвен
+const LUNCH_FROM = 13, LUNCH_TO = 13.7;
+const HOUSE_COST = 16;                                                // дом — 16 брёвен; брёвен в день тем больше, чем опытнее лесорубы
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function hash(n) { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
 function seeded(seed) { let s = seed % 2147483647 || 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
@@ -146,8 +146,8 @@ function doneHouse() {
 export const HUT_CAPACITY = 20;
 export const taxRateOf = D => { const l = (D.laws || []).find(x => x.policy === 'tax10' && !x.veto); return l ? 0.1 : 0; };
 export function housesDoneAt(hour, rate = 0) {
-  const day = Math.floor((Date.now() + 3 * 3600e3) / 864e5) - FOUND_DAY, wf = clamp((hour - WORK_FROM) / (WORK_TO - WORK_FROM), 0, 1);
-  return Math.min(40, Math.floor(LOGS_PER_DAY * (1 - rate) * (Math.max(0, day) + (day >= 0 ? wf : 0)) / HOUSE_COST));
+  const day = Math.floor((Date.now() + 3 * 3600e3) / 864e5) - FOUND_DAY;
+  return day < 0 ? 0 : Math.min(40, Math.floor(logsUntil(day, hour) * (1 - rate) / HOUSE_COST));
 }
 export const hutsNeeded = (pop, own) => Math.max(1, Math.ceil(Math.max(0, pop - own) / HUT_CAPACITY));
 
@@ -258,14 +258,29 @@ export function createSim(world, D) {
   const builders = agents.filter(a => a.role === 'walk' && !a.fireNight).slice(0, 2);       // двое плотников
   builders.forEach(a => a.role = 'build');
 
+  // ---------- жизнь: опыт, должности, деньги (sim_life.js) ----------
+  const hist = (D.popHistory || []).map(e => ({ d: Math.floor(Date.parse(e.date + 'T12:00:00Z') / 864e5) - FOUND_DAY, shown: Math.max(8, Math.round(e.pop * 0.5)) })).sort((p, q) => p.d - q.d);
+  const joinOf = i => { if (!hist.length) return 0; const e = hist.find(x => x.shown > i); return e ? Math.max(0, e.d) : Math.max(0, today() - FOUND_DAY); };
+  agents.forEach(a => { a.role0 = a.role; a.join = joinOf(a.i); a.talent = talentOf(a.i); });
+  const life = createLife(agents.map(a => ({ i: a.i, role: a.role0, join: a.join })), TAX);
+  let lifeKey = '', lifeCur = null, rolesChanged = false;
+  function lifeNow(day, hour) {
+    const k = day + ':' + hour.toFixed(2); if (k === lifeKey) return lifeCur;
+    lifeKey = k; lifeCur = life(day, hour);
+    agents.forEach((a, j) => { const r = lifeCur.role[j]; if (r !== a.role) { a.role = r; a.pk = ''; rolesChanged = true; } a.L = levelOf(lifeCur.xp[j]); a.mult = multOf(a.L); a.coins = lifeCur.coins[j]; a.hungry = !!lifeCur.hungry[j]; a.hiredDay = lifeCur.hiredDay[j]; });
+    return lifeCur;
+  }
+  { const d0 = new Date(Date.now() + 3 * 3600e3); lifeNow(today() - FOUND_DAY, d0.getUTCHours() + d0.getUTCMinutes() / 60); rolesChanged = false; }
+
   // ---------- экономика: брёвна → дома (детерминированно от времени) ----------
   const economy = (hour) => {
     const day = today() - FOUND_DAY, workFrac = clamp((hour - WORK_FROM) / (WORK_TO - WORK_FROM), 0, 1);
-    const daysWork = Math.max(0, day) + (day >= 0 ? workFrac : 0);
-    const logsAll = LOGS_PER_DAY * daysWork, logs = logsAll * (1 - TAX), done = Math.min(queue.length, plots.length, Math.floor(logs / HOUSE_COST));
+    const L = lifeNow(day, hour);
+    const logsAll = L.logs, logs = logsAll * (1 - TAX), done = Math.min(queue.length, plots.length, Math.floor(logs / HOUSE_COST));
     const prog = done < Math.min(queue.length, plots.length) ? (logs % HOUSE_COST) / HOUSE_COST : 0;
-    const fish = Math.round(nFish * 4 * daysWork), harvests = Math.max(0, Math.floor((day + 1) / 6));
-    return { day, logs: Math.floor(logsAll), done, prog, fish, harvests, workFrac, tax: TAX, reserve: { logs: Math.floor(logsAll * TAX), fish: Math.floor(fish * TAX) } };
+    const fish = Math.round(L.fish), harvests = Math.max(0, Math.floor((day + 1) / 6));
+    return { day, logs: Math.floor(logsAll), done, prog, fish, harvests, grain: Math.round(L.grain), workFrac, tax: TAX, treasury: Math.round(L.treasury),
+      reserve: { logs: Math.floor(logsAll * TAX), fish: Math.floor(fish * TAX) } };
   };
 
   // ---------- дома на карте ----------
@@ -328,10 +343,12 @@ export function createSim(world, D) {
 
   // места: двери шалашей, места у костра, у поленницы, рыбацкие места
   const hutDoor = h => { const d = Math.hypot(CAMP.x - h.x, CAMP.y - h.z) || 1; return [h.x + (CAMP.x - h.x) / d * 2.0, h.z + (CAMP.y - h.z) / d * 2.0]; };
-  const fishers = agents.filter(a => a.role === 'fish');
-  const rodMat = new THREE.MeshBasicMaterial({ color: '#3a2a1a' });
-  fishers.forEach((a, k) => { const z = CAMP.y - R * 0.8 + (k / Math.max(1, fishers.length - 1)) * R * 1.6; a.spotRaw = [riverX(z) - 3.45, z];
-    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.025, 2.2, 4), rodMat); rod.visible = false; scene.add(rod); a.rod = rod; });
+  const rodMat = new THREE.MeshBasicMaterial({ color: '#3a2a1a' }), rodGeo = new THREE.CylinderGeometry(0.015, 0.025, 2.2, 4);
+  function assignFish() {          // рыбаки стоят вдоль реки; новые рыбаки (устроились на работу) получают место и удочку
+    const fishers = agents.filter(a => a.role === 'fish');
+    fishers.forEach((a, k) => { const z = CAMP.y - R * 0.8 + (k / Math.max(1, fishers.length - 1)) * R * 1.6; a.spot = freeNear(riverX(z) - 3.45, z);
+      if (!a.rod) { a.rod = new THREE.Mesh(rodGeo, rodMat); a.rod.visible = false; scene.add(a.rod); } });
+  }
 
   function placeFixedSpots() {
     const owners = agents.filter(a => a.house && a.house.done), lodgers = agents.filter(a => !(a.house && a.house.done));
@@ -345,7 +362,7 @@ export function createSim(world, D) {
     const watchers = agents.filter(a => a.fireNight);
     watchers.forEach((a, k) => { const ang = k / watchers.length * 6.283; a.seat = freeNear(CAMP.x + Math.cos(ang) * 2.7, CAMP.y + Math.sin(ang) * 2.7); });
     woodcutters.forEach((a, k) => a.pileSpot = freeNear(pile.x + Math.sin(k * 2.4) * 1.5, pile.z + Math.cos(k * 2.4) * 1.5));
-    fishers.forEach(a => a.spot = freeNear(...a.spotRaw));
+    assignFish();
     agents.forEach(a => { const ang = hash(a.i + 31) * 6.283, r = 4.6 + hash(a.i + 33) * 3.2; a.dinner = freeNear(CAMP.x + Math.cos(ang) * r, CAMP.y + Math.sin(ang) * r * 0.9); });
   }
 
@@ -426,7 +443,7 @@ export function createSim(world, D) {
     if ((h >= a.sleep || h < a.wake) && !(a.fireNight && night)) return { act: 'sleep', goal: home };
     if (a.fireNight && night) return { act: 'fire', goal: a.seat };
     if (h < a.wake + 0.45) return { act: 'eat', goal: home, what: 'Завтракаю у дома' };
-    if (lunch) return { act: 'eat', goal: home, what: 'Обед! Марфа испекла хлеб' };
+    if (lunch) return { act: 'eat', goal: home, what: 'Обед! Купил хлеб у Марфы' };
     if (h >= 19 && h < 20.2) return { act: 'eat', goal: a.dinner, what: 'Ужинаем все вместе у костра' };
     const building = houseObjs.find(o => o.p < 1);
     if (work && building && (a.role === 'build' || building.owner === a)) {
@@ -451,10 +468,22 @@ export function createSim(world, D) {
   function thought(a) {
     const e = lastEco, b = houseObjs.find(o => o.p < 1), q = queue.indexOf(a), act = a.act;
     const own = a.house, nextOwner = b && b.owner ? b.owner.gen : null;
+    const coins = Math.floor(a.coins ?? 0), L = a.L, alt = (Math.floor(Date.now() / 7000) + a.i) % 3 === 0, ranks = RANKS[a.role];
+    // деньги и карьера
+    if (act !== 'sleep' && act !== 'fire') {
+      if (a.hungry && coins < BREAD) return ranks ? 'Монет не хватило на хлеб… Работаю — к вечеру будут деньги' : 'Денег нет даже на хлеб. Пора искать работу!';
+      if (!ranks && coins < 14) return `Осталось ${coinsW(coins)} — скоро пойду устраиваться на работу`;
+      if (!ranks && alt) return `Пока без работы. Живу на сбережения: ${coinsW(coins)}`;
+      if (ranks && a.hiredDay === lastEco.day && alt) return `Сегодня устроился ${PLACE[a.role]}! Теперь будут деньги на хлеб`;
+      if (ranks && L && alt && !L.top && L.lvl === 10) return `Ещё немного — и меня повысят до «${ranks[L.rank + 1]}»!`;
+      if (ranks && L && alt && L.top) return 'У меня своё производство! Скоро найму помощников';
+      if (ranks && L && alt && L.rank > 0 && (Math.floor(Date.now() / 7000) + a.i) % 2) return `Я уже ${ranks[L.rank]}. Работаю на ${Math.round((a.mult - 1) * 100)}% быстрее новичков`;
+      if (ranks && alt && coins >= 60) return `Накопил ${coinsW(coins)}. Коплю на своё дело`;
+    }
     switch (act) {
       case 'sleep': return own && own.done ? 'Сплю в своём доме. Тепло!' : 'Сплю… Снится собственный дом';
       case 'fire': return 'Сторожу костёр, пока все спят';
-      case 'eat': return a.plan.what || 'Ем';
+      case 'eat': return a.hungry ? 'Не на что купить хлеб — сижу голодный' : (a.plan.what || 'Ем') + ` · хлеб за ${BREAD} монеты`;
       case 'chop': if (TAX && Math.floor(a.phase * 10) % 3 === 0) return TAX_FAIL ? 'Отдать десятое бревно? Спрячу-ка его за пнём…' : 'Каждое десятое бревно — в общий запас';
         return nextOwner ? `Рублю. Ещё пара брёвен — и дом для ${nextOwner} вырастет` : 'Рублю дерево: брёвна нужны всем';
       case 'carry': return a.plan.to ? `Несу бревно на стройку дома ${a.plan.to.gen}` : 'Несу бревно к костру';
@@ -488,6 +517,7 @@ export function createSim(world, D) {
   function update(dt, hour, t) {
     dt = Math.min(dt, 0.1); pathBudget = first ? 99999 : 12; pathCalls = 0; pathT0 = first ? Infinity : performance.now();
     const dn = today(), eco = economy(hour); lastEco = eco;
+    if (rolesChanged) { rolesChanged = false; assignFish(); }
     if (dn !== dayKey) { dayKey = dn; [tree.x, tree.z] = treeSpot(dn); tree.t.position.set(tree.x, groundH(tree.x, tree.z), tree.z); treeOb.x = tree.x; treeOb.z = tree.z; housesKey = ''; }
     const hc = syncHouses(eco);
     if (hc === 'count' || first) { rebuildNav(); placeFixedSpots(); agents.forEach(a => { a.pk = ''; }); }
@@ -517,7 +547,7 @@ export function createSim(world, D) {
       // задержка на месте, потом следующая цель (поле, прогулка, пастбище, травы)
       if (arrived && a.dwell != null) { a.dwell -= dt; if (a.dwell <= 0) { if (a.act === 'farm') a.farmDone = true; else if (a.act === 'herd') a.herdDone = true; else if (a.act === 'herb') a.herbDone = true; else if (a.act === 'walk') a.walkDone = true; } }
       // лесоруб: 7 ударов → бревно на плечо → отнёс → снова рубит
-      if (a.act === 'chop' && arrived) { a.swing += dt; if (a.swing >= 7) { a.swing = 0; a.carry = true; } }
+      if (a.act === 'chop' && arrived) { a.swing += dt * (a.mult || 1); if (a.swing >= 7) { a.swing = 0; a.carry = true; } }
       if (a.act === 'carry' && arrived) a.carry = false;
       if (a.act !== 'chop' && a.act !== 'carry') a.carry = false;
       a.hidden = a.act === 'sleep' && arrived;
@@ -584,22 +614,35 @@ export function createSim(world, D) {
       an.g.position.set(an.x, groundH(an.x, an.z) + (step > 0 ? Math.abs(Math.sin(t * 10)) * 0.04 : 0), an.z); an.g.rotation.y = Math.atan2(-dz, dx);
     }
     const b = houseObjs.find(o => o.p < 1);
-    stats = { huts: huts.length, hutOcc, hutCap: HUT_CAPACITY, ...cnt, wood: cnt.chop, animals: animals.filter(an => an.g.visible).length, shown, pop, felled: fall >= 1 ? 1 : 0, trees: 1, prog: eco.workFrac,
+    const workers = agents.filter(a => RANKS[a.role]), best = workers.reduce((m, a) => !m || (a.L.rank * 10 + a.L.lvl) > (m.L.rank * 10 + m.L.lvl) ? a : m, null);
+    const lifeStats = { masters: workers.filter(a => a.L.rank >= 1).length, jobless: agents.length - workers.length, hungry: agents.filter(a => a.hungry).length,
+      avgCoins: Math.round(agents.reduce((x, a) => x + (a.coins || 0), 0) / agents.length), hiredToday: agents.filter(a => a.hiredDay === eco.day).length,
+      best: best ? { who: best.name || (best.female ? 'жительница' : 'житель') + ' №' + (best.i + 1), title: titleOf(best.role, best.L) } : null };
+    stats = { huts: huts.length, hutOcc, hutCap: HUT_CAPACITY, ...cnt, life: lifeStats, wood: cnt.chop, animals: animals.filter(an => an.g.visible).length, shown, pop, felled: fall >= 1 ? 1 : 0, trees: 1, prog: eco.workFrac,
       harvestIn: 5 - (((eco.day % 6) + 6) % 6), eco, building: b ? { owner: b.owner?.gen || 'жителя', p: b.p } : null, housesDone: eco.done };
     first = false;
   }
 
   // ---------- для интерфейса ----------
+  const coinsW = n => n + ' ' + plural(n, 'монета', 'монеты', 'монет');
+  function career(a) {
+    const L = a.L || levelOf(0), ranks = RANKS[a.role];
+    if (!ranks) return { title: 'Без работы', line: 'Ищет работу: без неё нечем платить за хлеб и место в шалаше', frac: 0 };
+    const next = L.top ? null : L.lvl < 10 ? `${L.lvl + 1} ур.` : ranks[L.rank + 1];
+    return { title: titleOf(a.role, L), rankNo: L.rank + 1, frac: L.frac, next, speed: Math.round((a.mult - 1) * 100), top: L.top,
+      line: L.top ? 'Вершина карьеры — своё производство!' : `Должность ${L.rank + 1} из 10 · до «${next}» ≈ ${Math.max(1, Math.round(L.dayLeft / a.talent))} ${plural(Math.max(1, Math.round(L.dayLeft / a.talent)), 'рабочий день', 'рабочих дня', 'рабочих дней')}` };
+  }
   function info(a) {
-    const days = Math.max(1, lastEco.day + 1), lvl = days >= 10 ? 'мастер' : days >= 3 ? '' : 'ученик';
+    const days = Math.max(1, lastEco.day - (a.join || 0) + 1);
     const h = lastHour, energy = a.act === 'sleep' ? 100 : Math.round(clamp(100 - (h - a.wake) / (a.sleep - a.wake) * 70, 20, 100));
-    const meals = [a.wake + 0.3, LUNCH_FROM + 0.3, 19.5].filter(m => m <= h), since = h - (meals.at(-1) ?? (h + 24 - 19.5 - 24));
-    const satiety = Math.round(clamp(100 - since * 14, 15, 100));
-    const q = queue.indexOf(a), own = a.house;
+    const meals = MEALS.filter(m => m <= h), since = h - (meals.at(-1) ?? (h + 24 - 19.5 - 24));
+    const satiety = Math.round(clamp((a.hungry ? 55 : 100) - since * 14, 5, 100));
+    const q = queue.indexOf(a), own = a.house, c = career(a), coins = Math.floor(a.coins ?? 0);
     const home = own ? (own.done ? 'Свой дом (сруб №' + (own.k + 1) + ')' : `Строит свой дом — готов на ${Math.round((houseObjs.find(o => o.owner === a)?.p || 0) * 100)}%`)
       : `Живёт в шалаше №${(a.hutNo ?? 0) + 1} (${hutOcc[a.hutNo ?? 0] ?? '?'} из ${HUT_CAPACITY} мест занято) · очередь на свой дом: ${q + 1}-й`;
-    const dream = own && own.done ? (a.female ? 'Завести корову и огород у дома' : 'Открыть свою мастерскую') : 'Построить собственный дом';
-    return { title: a.name || (a.female ? 'Жительница' : 'Житель') + ' №' + (a.i + 1), prof: (PROF[a.role] || 'Житель') + (lvl ? ' · ' + lvl : ''), days, home, thought: thought(a), energy, satiety, dream, named: a.named };
+    const dream = c.top ? 'Расширить своё производство и нанять работников' : own && own.done ? (a.female ? 'Завести корову и огород у дома' : 'Открыть свою мастерскую') : 'Построить собственный дом';
+    return { title: a.name || (a.female ? 'Жительница' : 'Житель') + ' №' + (a.i + 1), prof: c.title, career: c, coins: coinsW(coins), rawCoins: coins,
+      spend: `Хлеб ${BREAD} монеты × 3 раза в день, место в шалаше — 1 монета за ночь`, hungry: a.hungry, days, home, thought: thought(a), energy, satiety, dream, named: a.named };
   }
   let lastHour = 12;
   const raycaster = new THREE.Raycaster();
