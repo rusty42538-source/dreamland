@@ -114,6 +114,8 @@ select,input{width:100%;font:700 15px var(--body);padding:11px 12px;border-radiu
 .mod{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:20;display:grid;place-items:center;padding:20px;text-align:center}
 .mod img{max-width:100%;max-height:70vh;border-radius:14px;display:block;margin:0 auto}
 .mod p{color:#fff;font:700 14px/1.4 var(--body);margin:12px 0}
+.fault{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 70px);z-index:60;padding:12px 14px;border-radius:14px;background:rgba(20,13,6,.96);border:1px solid rgba(226,178,58,.5);color:#ffe9b8;font:700 13px/1.35 var(--body)}
+.fault button{margin-top:8px;padding:8px 14px}.fault small{display:block;margin-top:6px;color:#b9a888;font-weight:600;word-break:break-word}
 .loading{position:fixed;inset:0;display:grid;place-items:center;background:#1a1209;z-index:50;font:22px var(--disp);color:var(--gold2);transition:opacity .6s}
 @media (min-width:760px){.panel{left:20px;right:auto;width:420px;margin:0;border-radius:22px;bottom:calc(var(--navh) + 14px);max-height:calc(100vh - 200px)}.bar,.alert{right:auto;width:420px}}
 @media (prefers-reduced-motion:reduce){.live i{animation:none}.panel{transition:none}}
@@ -146,7 +148,25 @@ select,input{width:100%;font:700 15px var(--body);padding:11px 12px;border-radiu
   <button role="tab" data-tab="me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M8 17c1-2 7-2 8 0"/></svg>Паспорт</button>
 </nav>
 <div class="loading" id="loading">Государство загружается…</div>
-<script>window.WORLD_SITE = true;</script>
+<script>
+window.WORLD_SITE = true;
+// Самодиагностика на телефонах: если прошлая страница оборвалась (браузер её «убил» — белый экран), включаем облегчённый режим на сутки.
+// Вернуть полное качество: добавьте к адресу ?hq=1
+(function () {
+  try {
+    var L = localStorage, now = Date.now(), q = location.search;
+    if (/[?&]hq=1/.test(q)) { L.removeItem('lite'); L.setItem('clean', '1'); }
+    var last = +L.getItem('alive') || 0;
+    if (last && now - last < 20000 && L.getItem('clean') !== '1') L.setItem('lite', String(now));   // прошлая страница пропала меньше 20 с назад без нормального закрытия
+    L.setItem('clean', '0'); L.setItem('alive', String(now));
+    var t = +L.getItem('lite') || 0;
+    window.WORLD_LITE = (t && now - t < 864e5) || /[?&]lite=1/.test(q);
+    var bye = function () { try { L.setItem('clean', '1'); } catch (e) {} };
+    addEventListener('pagehide', bye); document.addEventListener('visibilitychange', function () { if (document.hidden) bye(); else { try { L.setItem('clean', '0'); } catch (e) {} } });
+  } catch (e) { window.WORLD_LITE = /[?&]lite=1/.test(location.search); }
+  window.WORLD_LOW = window.WORLD_LITE || (matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 600);
+})();
+</script>
 <script type="module" src="./world.js"></script>
 <script type="module" src="./app.js"></script>
 </body></html>

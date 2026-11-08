@@ -71,8 +71,16 @@ const lawsOk = () => D.laws.filter(l => !l.veto);
 
 // ---------- 3D ----------
 // качество: на телефонах дешевле; по замеру кадров снижаем ещё
-const QUALITY = { dpr: Math.min(devicePixelRatio || 1, matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5), fpsCap: 30 };
-let sim = null, world, camera, controls, flight = null, garland = null, crisisSmoke = [], pins = [];
+const LITE = !!window.WORLD_LITE;   // облегчённый режим: без теней, меньше разрешение, 24 кадра/с
+const QUALITY = { dpr: LITE ? 0.9 : Math.min(devicePixelRatio || 1, matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5), fpsCap: LITE ? 24 : 30 };
+let sim = null, world, camera, controls, flight = null, garland = null, crisisSmoke = [], pins = [], ctxLost = false;
+// сообщение о сбое вместо белого экрана: что случилось и кнопка «Обновить» (текст ошибки можно сфотографировать и прислать)
+function fault(text, detail = '', quiet = false) {
+  let el = document.getElementById('fault'); if (!el) { el = document.createElement('div'); el.id = 'fault'; el.className = 'fault'; document.body.appendChild(el); }
+  el.innerHTML = `${text}${quiet ? '' : '<br><button onclick="location.reload()">Обновить</button>'}${detail ? `<small>${detail.replace(/[<>&]/g, '')}</small>` : ''}`;
+}
+addEventListener('error', e => { if (/app\.js|sim_|world\.js/.test(e.filename || '')) fault('Что-то пошло не так.', `${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`); });
+addEventListener('unhandledrejection', e => fault('Что-то пошло не так.', String(e.reason?.message || e.reason)));
 const DATA_URL = './' + (new URLSearchParams(location.search).get('data') || 'data.json').replace(/[^\w.-]/g, '');
 const loadData = async () => (await fetch(DATA_URL + '?ts=' + Date.now(), { cache: 'no-store' })).json();
 
@@ -108,6 +116,12 @@ function buildWorld() {
   $('stage').appendChild(renderer.domElement);
   renderer.setPixelRatio(QUALITY.dpr);
   renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = true;
+  if (LITE) renderer.shadowMap.enabled = false;
+  // потеря графики (телефону не хватило видеопамяти): не оставляем белый экран, а восстанавливаем картинку
+  renderer.domElement.addEventListener('webglcontextlost', e => { e.preventDefault(); ctxLost = true; fault('Картинка на секунду пропала — восстанавливаю…', '', true);
+    setTimeout(() => { if (ctxLost) { const n = +sessionStorage.getItem('ctxReload') || 0; if (n < 2) { sessionStorage.setItem('ctxReload', n + 1); location.reload(); } else fault('Телефону не хватает ресурсов для 3D.', 'Попробуйте открыть ссылку в обычном браузере (Chrome или Safari), а не внутри Instagram.'); } }, 4000); });
+  renderer.domElement.addEventListener('webglcontextrestored', () => { ctxLost = false; renderer.shadowMap.needsUpdate = true; resize(); $('fault')?.remove(); });
+  setInterval(() => { try { localStorage.setItem('alive', String(Date.now())); } catch {} }, 2000);
   mergeStatic(scene);
   cheapMaterials(scene);
   sim = createSim(world, D);
@@ -487,6 +501,7 @@ let lastDt = 0.016, lastT = 0;
 let frameAcc = 0, perf = { n: 0, sum: 0, checked: 0 };
 function loop(now) {
   requestAnimationFrame(loop);
+  if (ctxLost) return;
   const t = clock.getElapsedTime(); if (t - lastT < 1 / QUALITY.fpsCap - 0.002) return;   // не чаще 30 кадров в секунду
   lastDt = t - lastT; lastT = t;
   // если кадры долгие — снижаем разрешение (один раз-два)

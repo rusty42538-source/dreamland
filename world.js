@@ -268,7 +268,7 @@ function buildMap(state) {
   const hemi = new THREE.HemisphereLight(winter ? '#dfe9f5' : '#ffeacc', winter ? '#7a8590' : '#5d7a3a', winter ? 1.3 : 1.15); scene.add(hemi);
   const sun = new THREE.DirectionalLight(winter ? '#fff3e6' : '#ffd9a0', winter ? 2.0 : 2.6);
   sun.position.set(-30, 40, 22); sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  const sm = SITE && window.WORLD_LOW ? 1024 : 2048; sun.shadow.mapSize.set(sm, sm);   // на телефонах тень вдвое легче — на вид почти незаметно
   Object.assign(sun.shadow.camera, { left: -32, right: 32, top: 32, bottom: -32, near: 1, far: 140 });
   sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03;
   scene.add(sun);
