@@ -37,8 +37,36 @@ export function levelOf(xp) {
   const lv = Math.min(9, Math.floor(left / needOf(r)));
   return { rank: r, lvl: lv + 1, frac: (left - lv * needOf(r)) / needOf(r), top: false, dayLeft: needOf(r) * (1 - (left - lv * needOf(r)) / needOf(r)) };
 }
-export const multOf = L => 1 + 0.12 * L.rank + 0.012 * (L.lvl - 1);   // скорость работы и заработок
-export const titleOf = (role, L) => RANKS[role] ? RANKS[role][L.rank] + (L.top ? '' : ` · ${L.lvl} ур.`) : 'Без работы';
+export const multOf = L => 1 + 0.12 * L.rank + 0.012 * (L.lvl - 1);   // скорость работы
+export const payMultOf = L => 1 + 0.3 * L.rank + 0.02 * (L.lvl - 1);   // зарплата: каждая должность +30%, каждый уровень +2%
+export const PAYDAY = 18;                                               // зарплата выдаётся раз в день — в конце рабочего дня
+
+// ---------- новые профессии: начинающие предприниматели открывают своё дело, когда на него появляется спрос ----------
+const L10 = (a, b, c, d, e, f, g, h, i, j) => [a, b, c, d, e, f, g, h, i, j];
+export const BIZ = {
+  potter: { name: 'гончар', shop: 'Гончарная', why: 'в новых домах нужна посуда', when: t => t.houses >= 1, color: '#c0704a',
+    ranks: L10('Начинающий гончар', 'Гончар', 'Мастер-гончар', 'Хозяин гончарной', 'Гончар с подмастерьями', 'Хозяин двух гончарных', 'Мастер посуды', 'Главный мастер посуды', 'Хозяин гончарного двора', 'Владелец посудного завода') },
+  tailor: { name: 'портной', shop: 'Швейная', why: 'одежда износилась — нужна новая', when: t => t.day >= 4, color: '#8a5fb0',
+    ranks: L10('Начинающий портной', 'Портной', 'Мастер-портной', 'Хозяин швейной', 'Портной с подмастерьями', 'Хозяин двух швейных', 'Закройщик', 'Главный закройщик', 'Хозяин швейного двора', 'Владелец швейной фабрики') },
+  smith: { name: 'кузнец', shop: 'Кузница', why: 'у работников тупятся топоры и мотыги', when: t => t.workers >= 30, color: '#55504a',
+    ranks: L10('Начинающий кузнец', 'Кузнец', 'Мастер-кузнец', 'Хозяин кузницы', 'Кузнец с подмастерьями', 'Хозяин двух кузниц', 'Оружейник', 'Главный оружейник', 'Хозяин кузнечного двора', 'Владелец кузнечного завода') },
+  mill: { name: 'мельник', shop: 'Мельница', why: 'зерна так много, что его пора молоть', when: t => t.grain >= 150, color: '#d9b25a',
+    ranks: L10('Начинающий мельник', 'Мельник', 'Мастер-мельник', 'Хозяин мельницы', 'Мельник с работниками', 'Хозяин двух мельниц', 'Мукомол', 'Главный мукомол', 'Хозяин мукомольни', 'Владелец мукомольного завода') },
+  smoke: { name: 'коптильщик', shop: 'Коптильня', why: 'рыбы больше, чем успевают съесть', when: t => t.fish >= 250, color: '#7a4a2a',
+    ranks: L10('Начинающий коптильщик', 'Коптильщик', 'Мастер-коптильщик', 'Хозяин коптильни', 'Коптильщик с работниками', 'Хозяин двух коптилен', 'Рыботорговец', 'Старший рыботорговец', 'Хозяин рыбного двора', 'Владелец рыбного завода') },
+  joiner: { name: 'столяр', shop: 'Столярная', why: 'в новые дома нужна мебель', when: t => t.houses >= 3, color: '#a0703a',
+    ranks: L10('Начинающий столяр', 'Столяр', 'Мастер-столяр', 'Хозяин столярной', 'Столяр с подмастерьями', 'Хозяин двух столярных', 'Мебельщик', 'Главный мебельщик', 'Хозяин мебельного двора', 'Владелец мебельной фабрики') },
+  cobbler: { name: 'сапожник', shop: 'Сапожная', why: 'лапти стоптались — нужна обувь', when: t => t.day >= 9, color: '#6a4a3a',
+    ranks: L10('Начинающий сапожник', 'Сапожник', 'Мастер-сапожник', 'Хозяин сапожной', 'Сапожник с подмастерьями', 'Хозяин двух сапожных', 'Обувщик', 'Главный обувщик', 'Хозяин обувного двора', 'Владелец обувной фабрики') },
+  trader: { name: 'торговец', shop: 'Лавка', why: 'у жителей появились сбережения — им есть что купить', when: t => t.savings >= 3000, color: '#2f7a3a',
+    ranks: L10('Начинающий торговец', 'Лавочник', 'Опытный лавочник', 'Хозяин лавки', 'Торговец с приказчиками', 'Хозяин двух лавок', 'Купец', 'Купец второй гильдии', 'Купец первой гильдии', 'Владелец торгового дома') },
+  kvass: { name: 'квасовар', shop: 'Квасная', why: 'зерна в избытке — можно варить квас', when: t => t.grain >= 600, color: '#b5802a',
+    ranks: L10('Начинающий квасовар', 'Квасовар', 'Мастер-квасовар', 'Хозяин квасной', 'Квасовар с работниками', 'Хозяин двух квасных', 'Пивовар', 'Главный пивовар', 'Хозяин пивоварни', 'Владелец пивоваренного завода') },
+};
+export const START_COST = 50;      // столько монет нужно, чтобы открыть своё дело (инструменты и материалы)
+const BUY = 0.4, BUY_FROM = 15;    // кто богаче 15 монет, тратит в среднем 0,4 монеты в день в каждой мастерской
+export const ladder = role => RANKS[role] || BIZ[role]?.ranks || null;
+export const titleOf = (role, L) => ladder(role) ? ladder(role)[L.rank] + (L.top ? '' : ` · ${L.lvl} ур.`) : 'Без работы';
 const workFracAt = h => clamp((h - WORK_FROM) / (WORK_TO - WORK_FROM), 0, 1);
 
 // Лесорубы известны заранее (Тимоша — №3 и житель №7), поэтому брёвна можно посчитать без всей симуляции
@@ -53,39 +81,80 @@ export function logsUntil(day, hour) {
 }
 
 // spec: [{ i, role, join }] — role: стартовая работа ('walk' — без работы), join — день прихода в государство
-export function createLife(spec, tax) {
+export function createLife(spec, tax, houseCost) {
   const n = spec.length, full = [];             // full[d] — состояние после полного дня d
   const init = () => ({ role: spec.map(s => s.role), xp: new Float64Array(n), coins: Float64Array.from(spec, s => 20 + Math.round(hash(s.i + 51) * 20)),
-    earned: new Float64Array(n), hungry: new Uint8Array(n), hiredDay: new Int32Array(n).fill(-1), treasury: 0, logs: 0, fish: 0, grain: 0, hires: [], promos: [] });
-  const clone = s => ({ ...s, role: s.role.slice(), xp: s.xp.slice(), coins: s.coins.slice(), earned: s.earned.slice(), hungry: s.hungry.slice(), hiredDay: s.hiredDay.slice(), hires: s.hires.slice(), promos: s.promos.slice() });
+    earned: new Float64Array(n), pay: new Float64Array(n), hungry: new Uint8Array(n), hiredDay: new Int32Array(n).fill(-1), paid: 0,
+    treasury: 0, logs: 0, fish: 0, grain: 0, hires: [], promos: [], biz: [] });
+  const clone = s => ({ ...s, role: s.role.slice(), xp: s.xp.slice(), coins: s.coins.slice(), earned: s.earned.slice(), pay: s.pay.slice(), hungry: s.hungry.slice(),
+    hiredDay: s.hiredDay.slice(), hires: s.hires.slice(), promos: s.promos.slice(), biz: s.biz.map(b => ({ ...b })) });
+  const free = r => r === 'walk' || r === 'farm' || r === 'fish';   // кто может уйти в своё дело (лесорубы, плотники и именные жители — на своих местах)
   // один день (или его часть до часа h)
   function step(s, d, h) {
-    const f = workFracAt(h), meals = MEALS.filter(m => m <= h).length, night = h >= 22 ? 1 : 0;
+    const f = workFracAt(h), meals = MEALS.filter(m => m <= h).length, night = h >= 22 ? 1 : 0, payday = h >= PAYDAY;
     const cnt = { farm: 0, fish: 0 }; s.role.forEach(r => { if (r in cnt) cnt[r]++; });
-    let bread = 0; s.hungry.fill(0);
+    let bread = 0; s.hungry.fill(0); s.pay.fill(0); s.paid = payday ? 1 : 0;
+    // утро: если появился спрос — самый богатый из простых работников открывает своё дело (не больше одного в день)
+    if (h >= WORK_FROM - 0.5) {
+      const t = { day: d, grain: s.grain, fish: s.fish, houses: Math.floor(s.logs * (1 - tax) / houseCost), workers: s.role.filter((r, k) => r !== 'walk' && d >= spec[k].join).length, savings: s.coins.reduce((a, b) => a + b, 0) };
+      const key = Object.keys(BIZ).find(b => !s.biz.some(x => x.key === b) && BIZ[b].when(t));
+      if (key) { let best = -1; for (let k = 0; k < n; k++) if (d >= spec[k].join && free(s.role[k]) && s.coins[k] >= START_COST && (best < 0 || s.coins[k] > s.coins[best])) best = k;
+        if (best >= 0) { s.biz.push({ key, k: best, d, was: s.role[best] }); s.role[best] = key; s.xp[best] = 0; s.coins[best] -= START_COST; } }
+    }
     for (let k = 0; k < n; k++) {
       if (d < spec[k].join) continue;
       // утро: денег мало — идёт устраиваться на работу
       if (s.role[k] === 'walk' && s.coins[k] < HIRE_BELOW && h >= WORK_FROM - 0.5) {
         const r = cnt.farm < CAP.farm ? 'farm' : cnt.fish < CAP.fish ? 'fish' : 'farm'; s.role[k] = r; cnt[r]++; s.hiredDay[k] = d; s.hires.push({ d, k, r });
       }
+      for (let j = 0; j < meals; j++) if (s.coins[k] >= BREAD) { s.coins[k] -= BREAD; bread++; } else s.hungry[k] = 1;
       const r = s.role[k];
       if (r !== 'walk') {
         const L0 = levelOf(s.xp[k]), m = multOf(L0);
-        for (let j = 0; j < meals; j++) if (s.coins[k] >= BREAD) { s.coins[k] -= BREAD; bread++; } else s.hungry[k] = 1;
-        const pay = WAGE[r] * m * f, t = pay * tax; s.coins[k] += pay - t; s.earned[k] += pay - t; s.treasury += t;
+        if (payday && WAGE[r]) { const pay = WAGE[r] * payMultOf(L0), t = pay * tax; s.coins[k] += pay - t; s.earned[k] += pay - t; s.pay[k] = pay - t; s.treasury += t; }
         s.xp[k] += talentOf(spec[k].i) * f * (s.hungry[k] ? 0.6 : 1);
         const L1 = levelOf(s.xp[k]); if (L1.rank > L0.rank) s.promos.push({ d, k, rank: L1.rank });
         if (r === 'wood') s.logs += 4 * m * f; else if (r === 'fish') s.fish += 4 * m * f; else if (r === 'farm') s.grain += 1.5 * m * f;
-      } else for (let j = 0; j < meals; j++) if (s.coins[k] >= BREAD) { s.coins[k] -= BREAD; bread++; } else s.hungry[k] = 1;
-      if (night) { const b = Math.min(BED, s.coins[k]); s.coins[k] -= b; s.treasury += b; }
+      }
     }
-    const ck = spec.findIndex((x, k) => s.role[k] === 'cook');   // хлеб покупают у пекаря: 10% цены — её доход сверх зарплаты (остальное — мука и дрова)
-    if (ck >= 0) { s.coins[ck] += bread * BREAD * 0.1; s.earned[ck] += bread * BREAD * 0.1; }
+    // вечером жители покупают товары в мастерских — это и есть доход предпринимателей
+    if (payday && s.biz.length) for (const b of s.biz) {
+      let sum = 0; const q = 1 + 0.1 * levelOf(s.xp[b.k]).rank;   // чем опытнее хозяин, тем лучше товар и тем больше покупают
+      for (let k = 0; k < n; k++) if (k !== b.k && d >= spec[k].join && s.coins[k] >= BUY_FROM) { const x = BUY * q; s.coins[k] -= x; sum += x; }
+      const t = sum * tax; s.coins[b.k] += sum - t; s.earned[b.k] += sum - t; s.pay[b.k] = sum - t; s.treasury += t; b.sold = Math.round(sum / 2);
+    }
+    if (night) for (let k = 0; k < n; k++) if (d >= spec[k].join) { const b = Math.min(BED, s.coins[k]); s.coins[k] -= b; s.treasury += b; }
+    const ck = s.role.indexOf('cook');   // хлеб покупают у пекаря: 10% цены — её доход сверх зарплаты (остальное — мука и дрова)
+    if (ck >= 0 && payday) { s.coins[ck] += bread * BREAD * 0.1; s.earned[ck] += bread * BREAD * 0.1; s.pay[ck] += bread * BREAD * 0.1; }
   }
   return function at(day, hour) {
     if (day < 0) return init();
     while (full.length < day) { const s = clone(full.length ? full[full.length - 1] : init()); step(s, full.length, 24); full.push(s); }
     const s = clone(day > 0 ? full[day - 1] : init()); step(s, day, hour); return s;
   };
+}
+
+// ожидаемая зарплата за полный день (для карточки жителя)
+export const wageOf = (role, L, tax) => WAGE[role] ? Math.round(WAGE[role] * payMultOf(L) * (1 - tax)) : null;
+
+// ---------- имена и фамилии жителей (у каждого свои, одинаковые у всех зрителей) ----------
+const M_NAMES = ['Иван', 'Пётр', 'Степан', 'Фёдор', 'Василий', 'Егор', 'Семён', 'Матвей', 'Тихон', 'Никита', 'Захар', 'Прохор', 'Яков', 'Демьян', 'Игнат', 'Кузьма', 'Савелий', 'Ефим', 'Лука', 'Фома',
+  'Илья', 'Андрей', 'Алексей', 'Григорий', 'Тимофей', 'Филипп', 'Остап', 'Мирон', 'Назар', 'Родион', 'Платон', 'Гордей', 'Ермолай', 'Макар', 'Антип', 'Добрыня', 'Елисей', 'Архип', 'Федот', 'Вавила'];
+const F_NAMES = ['Анна', 'Мария', 'Дарья', 'Ольга', 'Аксинья', 'Пелагея', 'Василиса', 'Фёкла', 'Агафья', 'Прасковья', 'Ульяна', 'Евдокия', 'Глафира', 'Варвара', 'Настасья', 'Любава', 'Милана', 'Зоя', 'Лукерья', 'Матрёна',
+  'Софья', 'Алёна', 'Арина', 'Ксения', 'Таисия', 'Устинья', 'Серафима', 'Олеся', 'Марфута', 'Дуняша', 'Злата', 'Ярослава', 'Василина', 'Мелания', 'Есения', 'Агния', 'Добрава', 'Забава', 'Полина', 'Вера'];
+const SURNAMES = ['Кузнецов', 'Мельников', 'Рыбаков', 'Плотников', 'Бондарев', 'Гончаров', 'Пахомов', 'Сидоров', 'Ковалёв', 'Ершов', 'Лапин', 'Зайцев', 'Медведев', 'Соколов', 'Воронин', 'Галкин', 'Сорокин',
+  'Белов', 'Чернов', 'Рыжов', 'Лесников', 'Полев', 'Ручьёв', 'Берёзин', 'Дубов', 'Клёнов', 'Осинин', 'Ивушкин', 'Пчёлкин', 'Мёдов', 'Калачёв', 'Пирогов', 'Блинов', 'Кашин', 'Щукин', 'Карасёв', 'Окунев',
+  'Ладушкин', 'Тетерин', 'Глухарёв', 'Снегирёв', 'Скворцов', 'Журавлёв', 'Лебедев', 'Гусев', 'Уткин', 'Морозов', 'Метелин', 'Вешнев', 'Солнцев'];
+const genFirst = (n, fem) => { const l = n.at(-1), p = n.at(-2);
+  if (l === 'а') return n.slice(0, -1) + ('гкхжшчщ'.includes(p) ? 'и' : 'ы');
+  if (l === 'я') return n.slice(0, -1) + 'и';
+  if (fem) return n;
+  if (l === 'й') return n.slice(0, -1) + 'я';
+  if (l === 'ь') return n.slice(0, -1) + 'я';
+  return n + 'а'; };
+export function personName(i, fem) {
+  const first = (fem ? F_NAMES : M_NAMES)[(i * 7 + 3) % 40], sur = SURNAMES[(i * 11 + 5) % SURNAMES.length];
+  const surF = sur + 'а', name = `${first} ${fem ? surF : sur}`;
+  const gen = `${genFirst(first, fem)} ${fem ? surF.slice(0, -1) + 'ой' : sur + 'а'}`;
+  return { name, gen, short: first };
 }
