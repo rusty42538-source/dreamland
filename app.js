@@ -6,6 +6,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeStatic, cheapMaterials, applyDayLook } from './scene_utils.js';
 import { createSim, housesDoneAt, hutsNeeded, HUT_CAPACITY, taxRateOf } from './sim_core.js';
 import { TRAITS, CONFLICT, pickTraits, describeWish, cleanWish, RESERVE } from './sim_life.js';
+import { acceptSubmissions } from './residents.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -66,7 +67,7 @@ const ICONS = {
   cow: '<svg viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="13" r="7" fill="currentColor"/><path d="M5 6l3 3M19 6l-3 3" stroke="currentColor" stroke-width="2.4"/></svg>',
 };
 
-let D = null, worldKey = '';
+let D = null, Dbase = null, worldKey = '';
 const effOf = l => (l && !l.veto && l.effects) || {};
 const lawsOk = () => D.laws.filter(l => !l.veto);
 
@@ -343,6 +344,24 @@ function myMini() {
   const i = sim.info(a);
   return `<div class="box mini" data-go="me"><div class="lbl">ТВОЙ ЖИТЕЛЬ</div><div class="hint" style="font-weight:800;color:#2b1a0e;margin-top:4px">${esc(i.title)} · ${esc(i.prof)}</div><div class="hint">💭 ${esc(i.thought)}</div></div>`;
 }
+// ---------- присяги подписчиков из таблицы: жители появляются сразу, без перезагрузки ----------
+let liveRows = (() => { try { return JSON.parse(store.get('liveRows') || '[]'); } catch { return []; } })();
+function withLive(d, rows) {
+  const m = mine(); let all = rows || [];
+  if (m && !all.some(r => nickOf(r.nick) === m.nick)) all = all.concat([{ nick: m.nick, traits: m.traits, wish: m.wish, ts: m.ts }]);   // свежая присяга этого посетителя — сразу, не дожидаясь таблицы
+  return { ...d, residents: [...(d.residents || []).filter(r => !r.live), ...acceptSubmissions(d, all)] };
+}
+const keyOf = list => JSON.stringify((list || []).map(r => [r.nick, r.traits, r.wish]));
+function refreshPanel() { if (tab) { const st = $('panel').scrollTop, open = !$('panel').classList.contains('closed'); showTab(tab); $('panel').scrollTop = st; togglePanel(open); } }
+function applyLive() {
+  if (!Dbase) return; const nd = withLive(Dbase, liveRows); if (keyOf(nd.residents) === keyOf(D.residents)) return;
+  D = nd; sim?.setResidents(D.residents); buildPins(); refreshPanel();
+}
+async function pollLive() {
+  if (document.hidden || !Dbase?.intake?.url) return;
+  try { const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 12000); const r = await fetch(Dbase.intake.url, { signal: ctl.signal, cache: 'no-store' }); clearTimeout(to);
+    const rows = await r.json(); if (!Array.isArray(rows)) return; liveRows = rows; store.set('liveRows', JSON.stringify(rows.slice(-400))); applyLive(); } catch {}
+}
 function wireMe() {
   const cf = $('createForm');
   if (cf) {
@@ -357,11 +376,11 @@ function wireMe() {
       const wish = $('cWish').value.trim() ? cleanWish($('cWish').value) : ''; if (wish === null) return err('Профессия: 2–24 символа — буквы, цифры, пробел и дефис.');
       const m = ex ? { nick: n, traits: ex.traits || [], wish: ex.wish || '', ts: Date.now() } : { nick: n, traits: pickTraits(draft.traits), wish: wish || '', ts: Date.now() }; store.set('mine', JSON.stringify(m));
       if (!ex && D.intake?.url) { try { await fetch(D.intake.url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ v: 1, nick: m.nick, traits: m.traits, wish: m.wish, ts: m.ts }) }); } catch {} }
-      showTab('me'); };
+      applyLive(); showTab('me'); setTimeout(pollLive, 4000); };   // житель появляется сразу, а через пару секунд сверяемся с таблицей
   }
   $('copyOath')?.addEventListener('click', async ev => { const m = mine(); try { await navigator.clipboard.writeText(`Присягаю! Мой ник: @${m.nick}. Характер: ${traitLine(m.traits)}.${m.wish ? ` Мечтаю стать: ${m.wish}.` : ''}`); ev.target.textContent = 'Скопировано — вставь в комментарии'; } catch { ev.target.textContent = 'Не вышло скопировать'; } });
   $('recheck')?.addEventListener('click', async () => { try { D = await loadData(); } catch {} showTab('me'); });
-  $('cancelMine')?.addEventListener('click', e => { e.preventDefault(); store.set('mine', ''); followAgent = null; showTab('me'); });
+  $('cancelMine')?.addEventListener('click', e => { e.preventDefault(); store.set('mine', ''); followAgent = null; applyLive(); showTab('me'); });
   const m = mine(), a = m && resOf(m.nick) && sim?.byNick(m.nick);
   if (a && $('follow')) {
     $('follow').onclick = ev => { if (followAgent === a) { followAgent = null; ev.target.textContent = 'Следить на карте'; } else { followAgent = a; flyTo(a.x, a.z, 14); togglePanel(false); ev.target.textContent = 'Не следить'; } };
@@ -577,19 +596,20 @@ function loop(now) {
 }
 
 // ---------- старт ----------
-D = await loadData();
-buildWorld(); dayNight(); renderAlert(); showTab('now');
+Dbase = await loadData(); D = withLive(Dbase, liveRows);      // данные + присяги из таблицы (сохранённые с прошлого раза — сразу, свежие подтянутся в фоне)
+buildWorld(); dayNight(); renderAlert(); showTab(sessionStorage.getItem('tab') || 'now'); sessionStorage.removeItem('tab');
+(function pollLoop() { pollLive(); setTimeout(pollLoop, 120000 + Math.random() * 30000); })();   // раз в 2–2,5 минуты, у каждого зрителя со своим сдвигом — чтобы не бить по таблице всем сразу
 setInterval(tickTimer, 1000); setInterval(dayNight, 30000);
 setInterval(async () => {
   if (document.hidden) return;   // вкладка не на виду — не спрашиваем (данные меняются раз в 4 часа)
   try {
     const d = await loadData();
-    if (JSON.stringify(d) === JSON.stringify(D)) return;
+    if (JSON.stringify(d) === JSON.stringify(Dbase)) return;
     if (JSON.stringify({ population: d.population, name: d.name || '', ...d.world, noCrowd: true, huts: hutsNeeded(d.population, housesDoneAt(mskHour(), taxRateOf(d))) }) !== worldKey) { location.reload(); return; }
-    D = d; renderBar(); renderAlert(); buildPins(); if (tab) { const st = $('panel').scrollTop; const open = !$('panel').classList.contains('closed'); showTab(tab); $('panel').scrollTop = st; togglePanel(open); }
+    Dbase = d; D = withLive(d, liveRows); sim?.setResidents(D.residents); renderBar(); renderAlert(); buildPins(); refreshPanel();
   } catch {}
 }, 300000);   // раз в 5 минут, а не раз в минуту
-window.__cam = () => camera; window.__fly = flyTo; window.__sim = () => sim;
+window.__cam = () => camera; window.__fly = flyTo; window.__sim = () => sim; window.__poll = pollLive;
 window.__dbg = () => ({ t: controls.target.toArray().map(v => +v.toFixed(2)), p: camera.position.toArray().map(v => +v.toFixed(1)) });
 loop();
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 700);

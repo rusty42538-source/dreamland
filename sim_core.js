@@ -253,9 +253,13 @@ export function createSim(world, D) {
   // жители, созданные подписчиками, занимают свободные места на карте (кроме именных, второго лесоруба и двух плотников) — по порядку присяги
   const builderAt = new Set([7 + nFish + nFarm, 8 + nFish + nFarm]), slots = [];
   for (let i = 7; i < shown; i++) if (!builderAt.has(i)) slots.push(i);
-  const resBySlot = new Map(); (D.residents || []).forEach((r, k) => { if (k < slots.length) resBySlot.set(slots[k], r); });
-  setTraitOverrides(Object.fromEntries([...resBySlot].filter(([, r]) => r.traits?.length).map(([i, r]) => [i, r.traits])));   // характеры, которые подписчики выбрали сами
-  setGoals(Object.fromEntries([...resBySlot].filter(([, r]) => r.wish).map(([i, r]) => [i, r.wish])));                         // желаемые профессии
+  let resBySlot = new Map();
+  const mapResidents = list => {      // раздаёт жителей-подписчиков по местам, их характеры и желаемые профессии
+    resBySlot = new Map(); (list || []).forEach((r, k) => { if (k < slots.length) resBySlot.set(slots[k], r); });
+    setTraitOverrides(Object.fromEntries([...resBySlot].filter(([, r]) => r.traits?.length).map(([i, r]) => [i, r.traits])));   // характеры, которые подписчики выбрали сами
+    setGoals(Object.fromEntries([...resBySlot].filter(([, r]) => r.wish).map(([i, r]) => [i, r.wish])));                         // желаемые профессии
+  };
+  mapResidents(D.residents);
   const agents = [];
   for (let i = 0; i < shown; i++) {
     let tpl = Math.floor(hash(i + 1) * 12), role = 'walk', named = null;
@@ -263,12 +267,13 @@ export function createSim(world, D) {
     if (named === 'grisha') role = 'herd'; else if (named === 'pakhom') role = 'elder'; else if (named === 'timosha') role = 'wood';
     else if (named === 'marfa') role = 'cook'; else if (named === 'nyura') role = 'herbal';
     else if (i === 6) role = 'wood'; else if (i < 7 + nFish) role = 'fish'; else if (i < 7 + nFish + nFarm) role = 'farm';
-    const res = resBySlot.get(i);
+    const res = resBySlot.get(i), baseRole = role;
     if (goalOf(i)?.kind === 'job') role = goalOf(i).key;       // мечтает быть рыбаком или земледельцем — работает им сразу
     const fem = tplDefs[tpl].female || named === 'marfa' || named === 'nyura';
     agents.push({ i, tpl, role, named, name: named ? names[named] : res ? '@' + res.nick : personName(i, fem).name, gen: named ? gens[named] : res ? '@' + res.nick : personName(i, fem).gen, acc: named ? (accs[named] || gens[named]) : res ? '@' + res.nick : personName(i, fem).acc, x: 0, z: 0, tx: 0, tz: 0, path: null, pk: '', speed: 1.1 + hash(i + 3) * 0.45,
       swing: hash(i + 21) * 7, workLen: 3.5 + hash(i + 7) * 2.5, restOff: hash(i + 8) * 7, phase: hash(i + 5) * 6.28, female: tplDefs[tpl].female || named === 'marfa' || named === 'nyura',
       act: 'walk', wait: 0, stuck: 0 });
+    agents.at(-1).baseRole = baseRole; agents.at(-1).workLen0 = agents.at(-1).workLen;
   }
 
   // очередь на собственный дом: сначала именные жители, потом остальные по номеру
@@ -285,9 +290,9 @@ export function createSim(world, D) {
   // лечебница: её строит государство (закон «Лекарня»); до тех пор лекарь лечит жителей дома и здания не имеет
   const clinic = world.clinic || null;
   const clinicFrom = clinic ? (D.world?.clinicSince ? Math.floor(Date.parse(D.world.clinicSince + 'T00:00:00Z') / 864e5) - FOUND_DAY : 0) : Infinity;
-  const life = createLife(agents.map(a => ({ i: a.i, role: a.role0, join: a.join, wish: goalOf(a.i)?.wish })), TAX, HOUSE_COST, clinicFrom);
-  let sickList = [];
-  let lifeKey = '', lifeCur = null, rolesChanged = false, bizList = [];
+  let life, sickList = [], lifeKey = '', lifeCur = null, rolesChanged = false, bizList = [];
+  const buildLife = () => { life = createLife(agents.map(a => ({ i: a.i, role: a.role0, join: a.join, wish: goalOf(a.i)?.wish })), TAX, HOUSE_COST, clinicFrom); lifeKey = ''; };
+  buildLife();
   function lifeNow(day, hour) {
     const k = day + ':' + hour.toFixed(2); if (k === lifeKey) return lifeCur;
     lifeKey = k; lifeCur = life(day, hour);
@@ -532,6 +537,17 @@ export function createSim(world, D) {
       const bob = c.mode === 'walk' ? Math.abs(Math.sin(t * 5 + c.ph)) * 0.03 : 0;
       c.lieK = (c.lieK || 0) + ((c.mode === 'lie' ? 1 : 0) - (c.lieK || 0)) * Math.min(1, dt * 1.5);
       g.position.set(c.x, groundH(c.x, c.z) + bob - c.lieK * 0.17, c.z); g.rotation.set(0, c.rot, c.lieK * 0.04); }
+  }
+  // список жителей-подписчиков изменился (пришла новая присяга): имена, характеры, мечты и жизнь пересчитываются на ходу, без перезагрузки
+  function setResidents(list) {
+    mapResidents(list);
+    for (const a of agents) { if (a.named) continue; const res = resBySlot.get(a.i), p = res ? null : personName(a.i, a.female);
+      a.name = res ? '@' + res.nick : p.name; a.gen = res ? '@' + res.nick : p.gen; a.acc = res ? '@' + res.nick : p.acc;
+      a.role0 = goalOf(a.i)?.kind === 'job' ? goalOf(a.i).key : a.baseRole; if (builders.includes(a)) a.role0 = 'build';
+      a.join = joinOf(a.i); a.talent = talentOf(a.i); a.traits = traitsOf(a.i); a.trait = a.traits[0]; a.traitName = traitName(a.i, a.female); a.workLen = Math.max(2, a.workLen0 + traitFx(a.i).work); a.pk = ''; }
+    buildLife(); rolesChanged = true;
+    shops.forEach(st => { if (st.m) scene.remove(st.m); }); shops.length = 0; shopObs.length = 0;      // здания дел пересоздаются под новое состояние
+    housesChanged = true;
   }
   const forestSpot = () => { for (let i = 0; i < 60; i++) { const x = -48 + Math.random() * 36, z = -55 + Math.random() * 70;
       if (x < riverX(z) - 6 && Math.hypot(x - CAMP.x, z - CAMP.y) > R + 8 && Math.hypot(x - tree.x, z - tree.z) > 10 && !inFarm(x, z, 8)) return [x, z]; } return [-40, -30]; };
@@ -810,7 +826,7 @@ export function createSim(world, D) {
   return {
     update: (dt, hour, t) => { lastHour = hour; update(dt, hour, t); },
     stats: () => stats, info, pick, headPos, thought, charThought, agents: () => agents,
-    plotsCount: () => plots.length, shopSlotsCount: () => shopSlots.length,
+    setResidents, plotsCount: () => plots.length, shopSlotsCount: () => shopSlots.length,
     byNick: nick => agents.find(a => a.name && a.name.replace(/^@/, '').toLowerCase() === nick),
     diary, dateOf,
     biz: () => bizList.map((b, j) => ({ key: b.key, state: b.state, p: b.p, shop: BIZ[b.key].shop, why: BIZ[b.key].why, what: BUILD[b.key].what, mats: b.mats, paid: b.paid, owner: b.owner.name, ownerGen: b.owner.gen, title: titleOf(b.key, b.owner.L || levelOf(0)), day: b.d, ready: b.ready, x: shops[j]?.x, z: shops[j]?.z, agent: b.owner })),
