@@ -686,6 +686,13 @@ export function createSim(world, D) {
     { const s2 = 0.25 + 0.75 * Math.min(1, grow * 1.1); if (farm.s2 !== s2) { farm.s2 = s2; farm.crops.forEach(c => { dummy.position.set(c.x, 0.17 + c.h * s2, c.z); dummy.rotation.set(0, c.ry, 0); dummy.scale.setScalar(s2); dummy.updateMatrix(); c.im.setMatrixAt(c.j, dummy.matrix); c.im.instanceMatrix.needsUpdate = true; }); } };
     farm.wheatM.color.setRGB(0.56 + 0.32 * grow, 0.75 - 0.05 * grow, 0.29 - 0.12 * grow);
 
+    { const MIN = 0.75, push = Math.min(1, dt * 5);       // мягкое расталкивание: два человека не могут стоять в одной точке
+      for (let i = 0; i < agents.length; i++) { const p = agents[i]; if (p.hidden) continue;
+        for (let j = i + 1; j < agents.length; j++) { const q = agents[j], dx = q.x - p.x, dz = q.z - p.z; if (dx > MIN || dx < -MIN || dz > MIN || dz < -MIN) continue;
+          let d = Math.hypot(dx, dz); if (d >= MIN) continue; let ux, uz; if (d < 0.01) { const an = (i * 2.4 + j) % 6.283; ux = Math.cos(an); uz = Math.sin(an); d = 0; } else { ux = dx / d; uz = dz / d; }
+          const m = (MIN - d) * 0.5 * push;
+          if (nav.passAt(q.x + ux * m, q.z + uz * m, q.act === "farm")) { q.x += ux * m; q.z += uz * m; }
+          if (nav.passAt(p.x - ux * m, p.z - uz * m, p.act === "farm")) { p.x -= ux * m; p.z -= uz * m; } } } }
     const cnt = { sick: 0, heal: 0, shopbuild: 0, rest: 0, chop: 0, carry: 0, build: 0, fish: 0, farm: 0, herd: 0, eat: 0, walk: 0, cook: 0, herb: 0, craft: 0 };
     for (const a of agents) {
       const pl = plan(a, hour, eco); a.plan = pl; a.act = pl.act;
