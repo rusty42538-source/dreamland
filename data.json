@@ -1,9 +1,9 @@
 {
-  "updated": "2026-11-08T23:58:00+03:00",
+  "updated": "2026-11-09T11:57:00+03:00",
   "name": "DreamLand",
   "instagram": "gosudarstvo.ai",
   "telegram": "",
-  "population": 136,
+  "population": 137,
   "stats": {
     "food": 50,
     "money": 35,
@@ -146,9 +146,13 @@
     {
       "date": "2026-11-08",
       "text": "Пришли 1 новый житель. Теперь в государстве 136."
+    },
+    {
+      "date": "2026-11-09",
+      "text": "Пришли 1 новый житель. Теперь в государстве 137."
     }
   ],
-  "followers": 36,
+  "followers": 37,
   "nameBy": {
     "author": "@ek_bbyw",
     "likes": 4,
@@ -169,6 +173,10 @@
     {
       "date": "2026-11-08",
       "pop": 136
+    },
+    {
+      "date": "2026-11-09",
+      "pop": 137
     }
   ],
   "intake": {
