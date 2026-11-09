@@ -213,10 +213,10 @@ export function createSim(world, D) {
 
   // ---------- ярмарочная площадь: места под здания предпринимателей (резервируются заранее, по одному зданию на дело) ----------
   const market = (() => {     // решётка 5×5 с шагом 5: берём ближайшие 16 свободных мест у первого подходящего центра
-    const lattice = []; for (let ix = -2; ix <= 2; ix++) for (let iz = -2; iz <= 2; iz++) lattice.push([ix * 5, iz * 5]);
+    const lattice = []; for (let ix = -3; ix <= 3; ix++) for (let iz = -3; iz <= 3; iz++) lattice.push([ix * 6.6, iz * 6.6]);
     let best = { x: CAMP.x - R * 0.8, z: CAMP.y + R * 0.6, pts: [] };
     for (let d = R * 0.55; d < R + 18; d += 0.9) for (let k = 0; k < 48; k++) { const a = k / 48 * 6.283, x = CAMP.x + Math.cos(a) * d, z = CAMP.y + Math.sin(a) * d * 0.9;
-      const pts = lattice.filter(([ox, oz]) => landClear(x + ox, z + oz, 2.6) && freeOf(x + ox, z + oz, 2.1) && !inFarm(x + ox, z + oz, 3) && Math.hypot(x + ox - pile.x, z + oz - pile.z) > 3.5)
+      const pts = lattice.filter(([ox, oz]) => landClear(x + ox, z + oz, 3.2) && freeOf(x + ox, z + oz, 3.4) && !inFarm(x + ox, z + oz, 3) && Math.hypot(x + ox - pile.x, z + oz - pile.z) > 3.5)
         .sort((p, q) => Math.hypot(...p) - Math.hypot(...q)).slice(0, MAX_SHOPS);
       if (pts.length > best.pts.length) best = { x, z, pts }; if (pts.length >= MAX_SHOPS) return best; }
     return best; })();
@@ -226,8 +226,8 @@ export function createSim(world, D) {
   const plots = [];
   { const r = seeded(9001);
     for (let i = 0; i < 9000 && plots.length < 40; i++) {
-      const a = r() * 6.283, d = 9 + Math.sqrt(r()) * (R + 16 - 9), x = CAMP.x + Math.cos(a) * d, z = CAMP.y + Math.sin(a) * d * 0.9;
-      if (!landClear(x, z, 2.7) || !freeOf(x, z, 2.4) || inFarm(x, z, 3.5) || plots.some(p => Math.hypot(p.x - x, p.z - z) < 4.3) || shopSlots.some(p => Math.hypot(p.x - x, p.z - z) < 4.9)) continue;
+      const a = r() * 6.283, d = 9 + Math.sqrt(r()) * (R + 34 - 9), x = CAMP.x + Math.cos(a) * d, z = CAMP.y + Math.sin(a) * d * 0.9;
+      if (!landClear(x, z, 2.7) || !freeOf(x, z, 2.4) || inFarm(x, z, 3.5) || plots.some(p => Math.hypot(p.x - x, p.z - z) < 5.8) || shopSlots.some(p => Math.hypot(p.x - x, p.z - z) < 6.2)) continue;
       plots.push({ x, z, rot: Math.atan2(CAMP.x - x, CAMP.y - z) });
     }
     plots.sort((p, q) => Math.hypot(p.x - CAMP.x, p.z - CAMP.y) - Math.hypot(q.x - CAMP.x, q.z - CAMP.y)); }
@@ -291,7 +291,7 @@ export function createSim(world, D) {
   const clinic = world.clinic || null;
   const clinicFrom = clinic ? (D.world?.clinicSince ? Math.floor(Date.parse(D.world.clinicSince + 'T00:00:00Z') / 864e5) - FOUND_DAY : 0) : Infinity;
   let life, sickList = [], lifeKey = '', lifeCur = null, rolesChanged = false, bizList = [];
-  const buildLife = () => { life = createLife(agents.map(a => ({ i: a.i, role: a.role0, join: a.join, wish: goalOf(a.i)?.wish })), TAX, HOUSE_COST, clinicFrom); lifeKey = ''; };
+  const buildLife = () => { life = createLife(agents.map(a => ({ i: a.i, role: a.role0, join: a.join, wish: goalOf(a.i)?.wish })), TAX, HOUSE_COST, clinicFrom, shopSlots.length); lifeKey = ''; };
   buildLife();
   function lifeNow(day, hour) {
     const k = day + ':' + hour.toFixed(2); if (k === lifeKey) return lifeCur;
@@ -826,6 +826,11 @@ export function createSim(world, D) {
   return {
     update: (dt, hour, t) => { lastHour = hour; update(dt, hour, t); },
     stats: () => stats, info, pick, headPos, thought, charThought, agents: () => agents,
+    // границы всех построек для проверок (отладка): дома, мастерские, шалаши, лечебница
+    footprints: () => { const out = [], box = (kind, o) => { const b = new THREE.Box3().setFromObject(o, true); out.push({ kind, x0: b.min.x, x1: b.max.x, z0: b.min.z, z1: b.max.z }); };
+      houseObjs.forEach(h => box('house', h.obj)); shops.forEach(st => st.m && box('shop', st.m));
+      huts.forEach(h => out.push({ kind: 'hut', x0: h.x - 1.7, x1: h.x + 1.7, z0: h.z - 1.7, z1: h.z + 1.7 }));
+      if (clinic) out.push({ kind: 'clinic', x0: clinic.x - 2.5, x1: clinic.x + 2.5, z0: clinic.z - 2.0, z1: clinic.z + 2.5 }); return out; },
     setResidents, plotsCount: () => plots.length, shopSlotsCount: () => shopSlots.length,
     byNick: nick => agents.find(a => a.name && a.name.replace(/^@/, '').toLowerCase() === nick),
     diary, dateOf,

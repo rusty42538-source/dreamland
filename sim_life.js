@@ -148,7 +148,7 @@ export function logsUntil(day, hour) {
 }
 
 // spec: [{ i, role, join }] — role: стартовая работа ('walk' — без работы), join — день прихода в государство
-export function createLife(spec, tax, houseCost, clinicFrom = Infinity) {
+export function createLife(spec, tax, houseCost, clinicFrom = Infinity, maxShops = MAX_SHOPS) {
   const n = spec.length, FX = spec.map(s => traitFx(s.i));       // история считается один раз и продвигается день за днём на месте (без копий всего журнала)
   const init = () => ({ role: spec.map(s => s.role), xp: new Float64Array(n), coins: Float64Array.from(spec, s => 20 + Math.round(hash(s.i + 51) * 20)),
     earned: new Float64Array(n), pay: new Float64Array(n), hungry: new Uint8Array(n), hiredDay: new Int32Array(n).fill(-1), paid: 0,
@@ -168,7 +168,7 @@ export function createLife(spec, tax, houseCost, clinicFrom = Infinity) {
       // 2) появился спрос — самый богатый из простых работников покупает брёвна и начинает стройку (одна стройка за раз)
       const t = { day: d, grain: s.grain, fish: s.fish, houses: s.houses, workers: s.role.filter((r, k) => r !== 'walk' && d >= spec[k].join).length, savings: s.coins.reduce((a, b) => a + b, 0) };
       s.demand = t;     // что сейчас происходит в государстве — по этому условию дела открываются (и показываются в «пути к мечте»)
-      if (s.biz.length < Math.min(MAX_SHOPS, Object.keys(BIZ).length) && !s.biz.some(b => b.state === 'build')) {   // все дела уже есть — спрос не проверяем
+      if (s.biz.length < Math.min(maxShops, Object.keys(BIZ).length) && !s.biz.some(b => b.state === 'build')) {   // все дела уже есть — спрос не проверяем
         const stock = s.logs * (1 - tax) - s.shopLogs - s.houses * houseCost;     // свободные брёвна на складе (после домов и прошлых строек)
         const score = k => s.coins[k] * (FX[k].bizFirst ? 2 : 1);   // мечтатели берутся за новое дело первыми
         for (const key of Object.keys(BIZ)) {
