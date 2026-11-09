@@ -519,7 +519,7 @@ function buildMap(state) {
     const dens = leftForest ? 1.0 : (z < -18 ? 0.5 : 0.1);
     if (rand() > dens) continue;
     const dc = Math.hypot(x - CAMP.x, z - CAMP.y);
-    if (dc < 15 || !free(x, z, 0.9) || groundH(x, z) > 14) continue;
+    if (dc < Math.max(15, 9 + Math.sqrt(pop) * 0.6 + 14) || !free(x, z, 0.9) || groundH(x, z) > 14) continue;   // вокруг поселения лес вырублен — тем шире, чем больше жителей
     const t = rand() < (leftForest ? 0.75 : 0.4) ? pine(rr(0.8, 1.4)) : leafy(rr(0.8, 1.3));
     scene.add(at(t, x, groundH(x, z) - 0.05, z)); blocked.push([x, z, 0.9]);
   }

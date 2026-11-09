@@ -158,6 +158,8 @@ export function createSim(world, D) {
   const pop = D.population, shown = Math.min(Math.max(8, Math.round(pop * 0.5)), MAX_SHOWN);
   const R = clamp(9 + Math.sqrt(pop) * 0.6, 12, 34);
   const okLand = (x, z) => x < riverX(z) - 4.2;
+  // здание с радиусом r целиком на суше: ни одна точка по контуру не заходит на берег и в воду (река — справа, её берег извивается)
+  const landClear = (x, z, r) => okLand(x, z) && [0, 1, 2, 3, 4, 5, 6, 7].every(k => { const a = k * Math.PI / 4, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r; return px < riverX(pz) - 4.4; });
   const today = () => Math.floor((Date.now() + 3 * 3600e3) / 864e5);
 
   // ---------- препятствия ----------
@@ -214,7 +216,7 @@ export function createSim(world, D) {
     const lattice = []; for (let ix = -2; ix <= 2; ix++) for (let iz = -2; iz <= 2; iz++) lattice.push([ix * 5, iz * 5]);
     let best = { x: CAMP.x - R * 0.8, z: CAMP.y + R * 0.6, pts: [] };
     for (let d = R * 0.55; d < R + 18; d += 0.9) for (let k = 0; k < 48; k++) { const a = k / 48 * 6.283, x = CAMP.x + Math.cos(a) * d, z = CAMP.y + Math.sin(a) * d * 0.9;
-      const pts = lattice.filter(([ox, oz]) => okLand(x + ox - 2.4, z + oz) && freeOf(x + ox, z + oz, 2.1) && !inFarm(x + ox, z + oz, 3) && Math.hypot(x + ox - pile.x, z + oz - pile.z) > 3.5)
+      const pts = lattice.filter(([ox, oz]) => landClear(x + ox, z + oz, 2.6) && freeOf(x + ox, z + oz, 2.1) && !inFarm(x + ox, z + oz, 3) && Math.hypot(x + ox - pile.x, z + oz - pile.z) > 3.5)
         .sort((p, q) => Math.hypot(...p) - Math.hypot(...q)).slice(0, MAX_SHOPS);
       if (pts.length > best.pts.length) best = { x, z, pts }; if (pts.length >= MAX_SHOPS) return best; }
     return best; })();
@@ -223,9 +225,9 @@ export function createSim(world, D) {
   // ---------- участки под дома (заранее, по кругу за шалашами) ----------
   const plots = [];
   { const r = seeded(9001);
-    for (let i = 0; i < 4000 && plots.length < 40; i++) {
-      const a = r() * 6.283, d = 9 + Math.sqrt(r()) * (R + 4 - 9), x = CAMP.x + Math.cos(a) * d, z = CAMP.y + Math.sin(a) * d * 0.9;
-      if (!okLand(x - 2, z) || !freeOf(x, z, 2.4) || inFarm(x, z, 3.5) || plots.some(p => Math.hypot(p.x - x, p.z - z) < 4.6) || shopSlots.some(p => Math.hypot(p.x - x, p.z - z) < 5.4)) continue;
+    for (let i = 0; i < 9000 && plots.length < 40; i++) {
+      const a = r() * 6.283, d = 9 + Math.sqrt(r()) * (R + 16 - 9), x = CAMP.x + Math.cos(a) * d, z = CAMP.y + Math.sin(a) * d * 0.9;
+      if (!landClear(x, z, 2.7) || !freeOf(x, z, 2.4) || inFarm(x, z, 3.5) || plots.some(p => Math.hypot(p.x - x, p.z - z) < 4.3) || shopSlots.some(p => Math.hypot(p.x - x, p.z - z) < 4.9)) continue;
       plots.push({ x, z, rot: Math.atan2(CAMP.x - x, CAMP.y - z) });
     }
     plots.sort((p, q) => Math.hypot(p.x - CAMP.x, p.z - CAMP.y) - Math.hypot(q.x - CAMP.x, q.z - CAMP.y)); }
@@ -808,6 +810,7 @@ export function createSim(world, D) {
   return {
     update: (dt, hour, t) => { lastHour = hour; update(dt, hour, t); },
     stats: () => stats, info, pick, headPos, thought, charThought, agents: () => agents,
+    plotsCount: () => plots.length, shopSlotsCount: () => shopSlots.length,
     byNick: nick => agents.find(a => a.name && a.name.replace(/^@/, '').toLowerCase() === nick),
     diary, dateOf,
     biz: () => bizList.map((b, j) => ({ key: b.key, state: b.state, p: b.p, shop: BIZ[b.key].shop, why: BIZ[b.key].why, what: BUILD[b.key].what, mats: b.mats, paid: b.paid, owner: b.owner.name, ownerGen: b.owner.gen, title: titleOf(b.key, b.owner.L || levelOf(0)), day: b.d, ready: b.ready, x: shops[j]?.x, z: shops[j]?.z, agent: b.owner })),
