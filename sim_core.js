@@ -311,14 +311,14 @@ export function createSim(world, D) {
   function diaryText(e) {
     const a = agents[e.k];
     switch (e.t) {
-      case 'hire': return `${who(a)} устроил${a.female ? 'ась' : 'ся'} на работу ${PLACE[e.r]}: монеты кончились, а хлеб платный`;
+      case 'hire': return `${who(a)} устроил${a.female ? 'ась' : 'ся'} на работу ${PLACE[e.r]}: монеты кончились, а еда платная`;
       case 'promo': { const fp = firstPromo(e), tail = a.traits.includes('hard') ? 'Трудолюбие окупается!' : a.traits.includes('lazy') ? 'Хоть и не спешил' + ending(a) + '…' : '';
         return `${whoT(a)} получил${ending(a)} повышение — теперь ${ladder(e.role)[e.rank]}${fp ? ' — перв' + (a.female ? 'ая' : 'ый') + ' в государстве!' : ''}${tail ? (fp ? ' ' : '. ') + tail : ''}`; }
       case 'oath': return `${who(a)} присягнул${ending(a)} государству и мечтает стать: ${(goalOf(a.i)?.wish || '').toLowerCase()}`;
       case 'mats': return `${a.traits.includes('dreamer') ? whoT(a) : who(a)} купил${ending(a)} ${e.n} ${plural(e.n, 'бревно', 'бревна', 'брёвен')} у лесорубов за ${coinsW(e.price)} и начал${ending(a)} строить ${BUILD[e.key].what}`;
       case 'heal': { const b = agents[e.to]; return `Баба Нюра вылечила ${whom(b)}: заболел${b.female ? 'а' : ''} ${e.clinic ? '— принята в лечебнице' : '— лекарь пришла на дом, лечебницы пока нет'}`; }
       case 'biz': return `Построена ${BIZ[e.key].shop.toLowerCase()}! ${a.traits.includes('dreamer') ? whoT(a) : who(a)} открыл${ending(a)} своё дело: ${BIZ[e.key].why}`;
-      case 'gift': { const b = agents[e.to]; return `${whoT(a)} угостил${ending(a)} хлебом ${whom(b)}: ${b.female ? 'ей' : 'ему'} не хватило монет на ужин`; }
+      case 'gift': { const b = agents[e.to]; return `${whoT(a)} угостил${ending(a)} едой ${whom(b)}: ${b.female ? 'ей' : 'ему'} не хватило монет на ужин`; }
       case 'sly': return `${whoT(a)} снова утаил${ending(a)} половину налога. Казна недосчиталась монет`;
       case 'harvest': return `Собран урожай! В амбарах уже ${e.grain} мер зерна`;
       case 'house': { const o = queue[e.n - 1]; return o ? `Достроен дом ${o.gen}! Новоселье — и место в шалаше освободилось` : `Достроен ещё один дом`; }
@@ -564,7 +564,7 @@ export function createSim(world, D) {
     const lunch = h >= LUNCH_FROM && h < LUNCH_TO, breakfast = h >= 7 && h < 7.45, dinner = h >= 19 && h < 20.2;
     const home = a.house && a.house.done && a.house.door ? a.house.door : a.hut;
     if (breakfast) return { act: 'eat', goal: home, what: 'Завтракаю у дома' };
-    if (lunch) return { act: 'eat', goal: home, what: 'Обед! Купил хлеб у Марфы' };
+    if (lunch) return { act: 'eat', goal: home, what: 'Обед! Купил еду у Марфы' };
     if (dinner) return { act: 'eat', goal: a.dinner, what: 'Ужинаем все вместе у костра' };
     if (fatigue(a, h).rest) return { act: 'rest', goal: home };
     const work = !lunch;
@@ -602,7 +602,7 @@ export function createSim(world, D) {
       rebel: TAX ? 'Долой налог! Напишу в Думу свой закон' : 'Никто мне не указ! Сам решаю, как жить',
       merry: 'Слыхали, как Гришина корова Марфу обогнала? Ха-ха!', dreamer: BIZ[a.role] ? 'Моя мастерская — только начало. Мечтаю о целом заводе!' : `Мечтаю о своём деле. Коплю на брёвна для здания`,
       lazy: 'Эх, поскорее бы перерыв…', hard: 'Работа не волк — а я её люблю!', sly: TAX ? 'Если никто не видит — налог можно заплатить и поменьше…' : 'Где бы урвать выгоду?',
-      kind: 'Если кто-то голоден — поделюсь хлебом', generous: 'Вечером зайду в мастерские — люблю красивые вещи', stingy: 'Каждая монета на счету. Коплю!' };
+      kind: 'Если кто-то голоден — поделюсь едой', generous: 'Вечером зайду в мастерские — люблю красивые вещи', stingy: 'Каждая монета на счету. Коплю!' };
     return T[a.traits[(Math.floor(Date.now() / 18000) + a.i) % a.traits.length]];   // два характера — мысли чередуются
   }
   function thought(a) {
@@ -617,7 +617,7 @@ export function createSim(world, D) {
     if (act !== 'rest' && act !== 'eat' && (Math.floor(Date.now() / 9000) + a.i) % 4 === 0) return charThought(a);
     if (act !== 'rest') {
       const dr = alt && dreamOf(a); if (dr && dr.thought) return dr.thought;
-      if (a.hungry && coins < BREAD) return ranks ? 'Монет не хватило на хлеб… Работаю — к вечеру будут деньги' : 'Денег нет даже на хлеб. Пора искать работу!';
+      if (a.hungry && coins < BREAD) return ranks ? 'Монет не хватило на еду… Работаю — к вечеру будут деньги' : 'Денег нет даже на хлеб. Пора искать работу!';
       if (!ranks && coins < 14) return `Осталось ${coinsW(coins)} — скоро пойду устраиваться на работу`;
       if (!ranks && alt) return `Пока без работы. Живу на сбережения: ${coinsW(coins)}`;
       const own = BIZ[a.role] && bizList.find(b => b.owner === a && b.state === 'open');
@@ -625,7 +625,7 @@ export function createSim(world, D) {
       if (own && alt && lastHour >= PAYDAY) return `Сегодня продал${a.female ? 'а' : ''} ${own.sold || 0} товаров — выручка ${coinsW(Math.round(a.pay || 0))}`;
       if (own && alt) return `Я ${BIZ[a.role].name}, своё дело. Чем лучше товар — тем больше покупателей`;
       if (ranks && !own && lastHour >= PAYDAY && lastHour < PAYDAY + 1.5 && a.pay > 0) return `Получил${a.female ? 'а' : ''} зарплату — ${coinsW(Math.round(a.pay))}!`;
-      if (ranks && a.hiredDay === lastEco.day && alt) return `Сегодня устроился ${PLACE[a.role]}! Теперь будут деньги на хлеб`;
+      if (ranks && a.hiredDay === lastEco.day && alt) return `Сегодня устроился ${PLACE[a.role]}! Теперь будут деньги на еду`;
       if (ranks && L && alt && !L.top && L.lvl === 10) return `Ещё немного — и меня повысят до «${ranks[L.rank + 1]}»!`;
       if (ranks && L && alt && L.top) return 'У меня своё производство! Скоро найму помощников';
       if (ranks && L && alt && L.rank > 0 && (Math.floor(Date.now() / 7000) + a.i) % 2) return `Я уже ${ranks[L.rank]}. Работаю на ${Math.round((a.mult - 1) * 100)}% быстрее новичков`;
@@ -633,7 +633,7 @@ export function createSim(world, D) {
     }
     switch (act) {
       case 'rest': { const f = fatigue(a, lastHour); return `Устал${a.female ? 'а' : ''} — беру перерыв на час. Ещё ${f.left} мин, и снова за работу`; }
-      case 'eat': return a.hungry ? 'Не на что купить хлеб — сижу голодный' : (a.plan.what || 'Ем') + ` · хлеб за ${BREAD} монеты`;
+      case 'eat': return a.hungry ? 'Не на что купить еду — сижу голодный' : (a.plan.what || 'Ем') + ` · еда за ${BREAD} монеты`;
       case 'chop': if (TAX && Math.floor(a.phase * 10) % 3 === 0) return TAX_FAIL ? 'Отдать десятое бревно? Спрячу-ка его за пнём…' : 'Каждое десятое бревно — в общий запас';
         return nextOwner ? `Рублю. Ещё пара брёвен — и дом для ${nextOwner} вырастет` : 'Рублю дерево: брёвна нужны всем';
       case 'carry': return a.plan.to ? `Несу бревно на стройку дома ${a.plan.to.gen}` : 'Несу бревно к костру';
@@ -786,7 +786,7 @@ export function createSim(world, D) {
   }
   function career(a) {
     const L = a.L || levelOf(0), ranks = ladder(a.role);
-    if (!ranks) return { title: 'Без работы', line: 'Ищет работу: без неё нечем платить за хлеб и место в шалаше', frac: 0 };
+    if (!ranks) return { title: 'Без работы', line: 'Ищет работу: без неё нечем платить за еду и место в шалаше', frac: 0 };
     const next = L.top ? null : L.lvl < 10 ? `${L.lvl + 1} ур.` : ranks[L.rank + 1];
     const biz = BIZ[a.role], own = biz && bizList.find(b => b.owner === a), paid = lastHour >= PAYDAY, pay = Math.round(a.pay || 0), wage = wageOf(a.role, L, TAX);
     const mine = bizList.find(b => b.owner === a), building = mine && mine.state === 'build', healer = a.role === 'herbal';
@@ -807,7 +807,7 @@ export function createSim(world, D) {
       : `Живёт в шалаше №${(a.hutNo ?? 0) + 1} (${hutOcc[a.hutNo ?? 0] ?? '?'} из ${HUT_CAPACITY} мест занято) · очередь на свой дом: ${q + 1}-й`;
     const dream = c.top ? 'Расширить своё производство и нанять работников' : own && own.done ? (a.female ? 'Завести корову и огород у дома' : 'Открыть свою мастерскую') : 'Построить собственный дом';
     return { title: a.name, prof: c.title, career: c, coins: coinsW(coins), rawCoins: coins, trait: a.traitName, goal: dreamOf(a), traits: a.traits, traitAbout: a.traits.map(k => TRAITS[k].about).join('; '), life: diary(6, a.i),
-      spend: `Хлеб ${BREAD} монеты × 3 раза в день, место в шалаше — 1 монета в день` + (bizList.length ? ', покупки в мастерских' : ''), hungry: a.hungry, days, home, thought: thought(a), energy, satiety, dream, named: a.named };
+      spend: `Еда ${BREAD} монеты × 3 раза в день, место в шалаше — 1 монета в день` + (bizList.length ? ', покупки в мастерских' : ''), hungry: a.hungry, days, home, thought: thought(a), energy, satiety, dream, named: a.named };
   }
   let lastHour = 12;
   const raycaster = new THREE.Raycaster();
