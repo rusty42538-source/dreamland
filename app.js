@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeStatic, cheapMaterials, applyDayLook } from './scene_utils.js';
 import { createSim, housesDoneAt, hutsNeeded, HUT_CAPACITY, taxRateOf } from './sim_core.js';
+import { TRAITS, CONFLICT, pickTraits, describeWish, cleanWish, RESERVE } from './sim_life.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -117,6 +118,7 @@ function buildWorld() {
   camera.position.set(4, 36, 50);
   controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(0, 0, -2); controls.enableDamping = true; controls.dampingFactor = 0.08;
+  controls.addEventListener('start', () => { followAgent = null; document.getElementById('follow') && (document.getElementById('follow').textContent = 'Следить на карте'); });   // взял карту рукой — слежение выключается
   controls.minDistance = 8; controls.maxDistance = 110; controls.maxPolarAngle = 1.36; controls.autoRotateSpeed = 0.3;
   // управление как у карты: один палец / левая кнопка — двигать, щипок — масштаб, два пальца / правая кнопка — поворот
   controls.screenSpacePanning = false; controls.panSpeed = 1.3; controls.zoomSpeed = 1.1;
@@ -234,6 +236,7 @@ const TABS = {
     const welcome = store.get('welcomed') ? '' : `<div class="welcome" id="welcome"><b>Это государство подписчиков.</b> Каждый подписчик — новый житель, каждый комментарий под роликом — законопроект. Закон с наибольшим числом лайков вступает в силу, и мир здесь меняется.<br><button id="okWelcome">Понятно</button></div>`;
     const leaders = (s.leaders || []).slice(0, 3);
     return `${welcome}
+    ${myMini()}
     <div class="box"><div class="lbl">ЗАСЕДАНИЕ ДУМЫ №${s.num || 1} · ИДЁТ СЕЙЧАС</div><div class="q">${esc(s.question || 'Скоро новое заседание')}</div>
       <div class="row"><div class="timer" id="timer">--:--:--</div>${vote ? `<a href="${esc(vote)}" target="_blank" rel="noopener"><button>Голосовать в Instagram</button></a>` : ''}</div>
       <div class="hint" style="margin-top:8px">Напиши в комментариях под роликом <b>${esc(s.format || 'ЗАКОН: …')}</b> и лайкай лучшие варианты.</div>
@@ -282,28 +285,91 @@ const TABS = {
       `<h3>Как попасть сюда</h3><ol class="steps"><li>Напиши закон в комментариях под новым роликом.</li><li>Собери больше всех лайков за 24 часа — зови друзей.</li><li>Закон вступает в силу, а ты — в историю. Победить можно не чаще раза в неделю.</li></ol>`;
   },
   me() {
-    return `<h2>Паспорт гражданина</h2><div class="sub">Найди себя среди граждан государства</div>
-    <form class="form" id="findForm"><input id="nick" placeholder="Твой ник в Instagram" autocomplete="off" autocapitalize="off" aria-label="Ник в Instagram"><button>Найти</button></form>
-    <div id="pass"></div>
-    <h3>Как получить паспорт</h3>
-    <ol class="steps"><li>Подпишись${D.instagram ? ` на <a href="${esc(igUrl())}" target="_blank" rel="noopener"><b>@${esc(nk(D.instagram))}</b></a>` : ''} — так ты становишься одним из жителей.</li><li>Напиши «Присягаю» в комментариях под любым роликом.</li><li>В течение суток получишь номер гражданина. Найди себя здесь и сделай картинку для сторис.</li></ol>`;
+    const m = mine();
+    if (m && resOf(m.nick)) return myHtml(m);
+    return (m ? pendingHtml(m) : createHtml()) + findBox();
   },
 };
 
-function passportHtml(r) {
-  const laws = lawsOk().filter(l => nk(l.author) === nk(r.nick)), mins = D.ministers.filter(m => nk(m.nick) === nk(r.nick));
-  return `<div class="passport"><div class="k">${esc((D.name || 'Государство подписчиков').toUpperCase())} · ПАСПОРТ</div><div class="num">№ ${String(r.num).padStart(4, '0')}</div>
-    <div class="f"><span>Гражданин</span>@${esc(nk(r.nick))}</div><div class="f"><span>Занятие</span>${esc(r.prof || 'житель')}</div>
-    ${r.joined ? `<div class="f"><span>Присяга</span>${esc(r.joined)}</div>` : ''}
-    <div class="f"><span>Принятых законов</span>${laws.length}</div>${mins.length ? `<div class="f"><span>Должность</span>${esc(mins.map(m => m.post).join(', '))}</div>` : ''}</div>
-    <button id="story" style="width:100%;margin-top:10px">Сделать картинку для сторис</button>`;
+// ---------- мой житель: создание, ожидание присяги, наблюдение ----------
+const mine = () => { try { return JSON.parse(store.get('mine') || 'null'); } catch { return null; } };
+const nickOf = raw => nk(raw).replace(/[^a-z0-9._]/g, '').slice(0, 30);
+const resOf = n => (D.residents || []).find(r => nk(r.nick) === n);
+const TR_KEYS = Object.keys(TRAITS), draft = { nick: '', traits: [], wish: '' };
+const wishLine = text => { const g = describeWish(text); if (!text.trim()) return ''; if (!g) return 'Профессия: 2–24 символа — буквы, цифры, пробел и дефис.';
+  return g.kind === 'job' ? `Профессия «${g.wish}»: станет сразу, а дальше — расти по должностям.` : `Профессия «${g.wish}»: он начнёт с работы, накопит ${g.price + RESERVE} монет на брёвна (${g.price} за ${g.what}), дождётся момента (${g.need}), построит здание сам и откроет своё дело.`; };
+const traitLine = ks => ks.map((k, j) => j ? TRAITS[k].m.toLowerCase() : TRAITS[k].m).join(' и ');
+let followAgent = null;
+function createHtml() {
+  return `<h2>Создай своего жителя</h2><div class="sub">Он будет жить в ${esc(D.name || 'государстве')} под твоим ником: работать, копить, строить и обрастать историей. А ты сможешь за ним наблюдать.</div>
+  <form id="createForm" class="box"><div class="lbl">ТВОЙ НИК В INSTAGRAM</div>
+    <input id="cNick" placeholder="например, ek_bbyw" value="${esc(draft.nick)}" autocomplete="off" autocapitalize="off" aria-label="Ник в Instagram" style="margin-top:6px">
+    <div class="lbl" style="margin-top:14px">ХАРАКТЕР · ВЫБЕРИ ДО ДВУХ</div>
+    <div class="traits">${TR_KEYS.map(k => `<button type="button" class="tr" data-k="${k}"><b>${esc(TRAITS[k].m)}</b><small>${esc(TRAITS[k].about)}</small></button>`).join('')}</div>
+    <div class="lbl" style="margin-top:14px">ЖЕЛАЕМАЯ ПРОФЕССИЯ · НЕОБЯЗАТЕЛЬНО</div>
+    <input id="cWish" placeholder="например: гончар, рыбак, космонавт" maxlength="24" value="${esc(draft.wish)}" autocomplete="off" aria-label="Желаемая профессия" style="margin-top:6px">
+    <div class="chips" id="cWishChips">${['Рыбак', 'Земледелец', 'Гончар', 'Кузнец', 'Мельник', 'Портной', 'Столяр', 'Торговец'].map(w => `<span data-w="${w}">${w}</span>`).join('')}</div>
+    <div id="cPrev" class="hint" style="margin-top:12px"></div><div id="cErr" class="hint down" style="font-weight:800"></div>
+    <button id="cGo" style="width:100%;margin-top:10px">Присягнуть и создать жителя</button></form>`;
 }
+function pendingHtml(m) {
+  const reel = (D.session || {}).reel || igUrl();
+  return `<h2>Присяга принята</h2><div class="sub">@${esc(m.nick)} · ${esc(traitLine(m.traits))}${m.wish ? ` · мечтает стать: ${esc(m.wish.toLowerCase())}` : ''}</div>
+  <div class="box"><div class="hint" style="font-weight:700;color:#2b1a0e">${D.intake?.url ? 'Заявка отправлена. Житель появится после ближайшего обновления данных — обычно в течение нескольких часов.' : 'Чтобы житель появился, напиши присягу в комментариях под последним роликом — тебя добавят при ближайшем обновлении.'}</div>
+    ${D.intake?.url ? '' : `<button id="copyOath" style="width:100%;margin-top:10px">Скопировать присягу</button>${reel ? `<a href="${esc(reel)}" target="_blank" rel="noopener"><button style="width:100%;margin-top:8px">Открыть ролик</button></a>` : ''}`}
+    <button id="recheck" style="width:100%;margin-top:8px">Проверить, появился ли мой житель</button></div>
+  <div class="hint">Передумал? <a href="#" id="cancelMine">Начать заново</a></div>`;
+}
+function myHtml(m) {
+  const r = resOf(m.nick), a = sim?.byNick(m.nick);
+  if (!a) return `<h2>@${esc(m.nick)}</h2><div class="box hint">Твой житель уже в государстве, но на карте сейчас видны не все: она показывает каждого второго. Он продолжает жить — дневник появится, как только он попадёт в кадр.</div>${findBox()}`;
+  const seen = +store.get('seen_' + m.nick) || 0, evs = sim.diary(80, a.i).filter(e => e.ts > seen && e.ts <= Date.now()).slice(0, 6);
+  const digest = seen ? (evs.length ? `<div class="box digest"><div class="lbl">С ВОЗВРАЩЕНИЕМ! ПОКА ТЕБЯ НЕ БЫЛО</div>${evs.map(diaryRow).join('')}</div>` : '')
+    : `<div class="box digest"><div class="lbl">ТВОЙ ЖИТЕЛЬ ПОЯВИЛСЯ</div><div class="hint" style="font-weight:700;color:#2b1a0e;margin-top:4px">Добро пожаловать в ${esc(D.name || 'государство')}! Заходи позже: сюда будут попадать события из его жизни — работа, повышения, стройки, болезни.</div></div>`;
+  return `${digest}<div id="myLive">${residentHtml(a)}</div>
+    <div class="row2"><button id="follow">${followAgent === a ? 'Не следить' : 'Следить на карте'}</button><button id="story">Картинка для сторис</button></div>
+    <div class="hint" style="margin-top:10px"><a href="#" id="cancelMine">Это не я — начать заново</a></div>${findBox()}`;
+}
+const findBox = () => `<h3>Найти другого жителя</h3><form class="form" id="findForm"><input id="nick" placeholder="Ник в Instagram" autocomplete="off" autocapitalize="off" aria-label="Ник в Instagram"><button>Найти</button></form><div id="pass"></div>`;
 function findMe(raw) {
-  const n = nk(raw); if (!n) return;
-  const r = D.residents.find(x => nk(x.nick) === n);
-  $('pass').innerHTML = r ? passportHtml(r) : `<div class="box empty">@${esc(n)} пока нет среди граждан. Напиши «Присягаю» под любым роликом — и в течение суток паспорт появится здесь.</div>`;
-  if (r) { $('story').onclick = () => storyImage(r); store.set('me', n); }
+  const n = nickOf(raw); if (!n) return;
+  const a = sim?.byNick(n);
+  if (a) showResident(a); else $('pass').innerHTML = `<div class="box empty">@${esc(n)} пока нет среди жителей${resOf(n) ? ' на карте' : ''}. Каждый может создать своего: вкладка «Мой житель».</div>`;
 }
+function myMini() {
+  const m = mine(); if (!m) return `<div class="box" data-go="me"><div class="lbl">ТВОЙ ЖИТЕЛЬ</div><div class="hint" style="margin-top:4px">Создай жителя со своим ником и характером — и наблюдай, как он живёт.</div><button style="width:100%;margin-top:8px">Создать жителя</button></div>`;
+  const a = resOf(m.nick) && sim?.byNick(m.nick);
+  if (!a) return `<div class="box" data-go="me"><div class="lbl">ТВОЙ ЖИТЕЛЬ · @${esc(m.nick)}</div><div class="hint" style="margin-top:4px">Присяга принята — ждём, когда житель появится в государстве.</div></div>`;
+  const i = sim.info(a);
+  return `<div class="box mini" data-go="me"><div class="lbl">ТВОЙ ЖИТЕЛЬ</div><div class="hint" style="font-weight:800;color:#2b1a0e;margin-top:4px">${esc(i.title)} · ${esc(i.prof)}</div><div class="hint">💭 ${esc(i.thought)}</div></div>`;
+}
+function wireMe() {
+  const cf = $('createForm');
+  if (cf) {
+    const sync = () => { const on = draft.traits; cf.querySelectorAll('.tr').forEach(b => { const k = b.dataset.k; b.classList.toggle('on', on.includes(k)); b.disabled = !on.includes(k) && (on.length >= 2 || on.some(o => CONFLICT[o] === k)); });
+      const n = nickOf($('cNick').value), wl = wishLine($('cWish').value); $('cPrev').innerHTML = (n && on.length ? `<b style="color:#2b1a0e">@${esc(n)}</b> — ${esc(traitLine(on))}: ${esc(on.map(k => TRAITS[k].about).join('; '))}.` : 'Введи ник и выбери характер — покажу, каким он будет.') + (wl ? `<br>${esc(wl)}` : ''); };
+    cf.querySelectorAll('.tr').forEach(b => b.onclick = () => { const k = b.dataset.k; draft.traits = draft.traits.includes(k) ? draft.traits.filter(x => x !== k) : [...draft.traits, k]; sync(); });
+    $('cNick').oninput = () => { draft.nick = nickOf($('cNick').value); sync(); }; $('cWish').oninput = () => { draft.wish = $('cWish').value; sync(); };
+    cf.querySelectorAll('#cWishChips span').forEach(c => c.onclick = () => { $('cWish').value = c.dataset.w; draft.wish = c.dataset.w; sync(); }); sync();
+    cf.onsubmit = async e => { e.preventDefault(); const n = nickOf($('cNick').value), err = t => { $('cErr').textContent = t; };
+      if (!n) return err('Введи свой ник в Instagram — буквы, цифры, точка и подчёркивание.'); const ex = resOf(n);
+      if (!ex && !draft.traits.length) return err('Выбери хотя бы один характер.');
+      const wish = $('cWish').value.trim() ? cleanWish($('cWish').value) : ''; if (wish === null) return err('Профессия: 2–24 символа — буквы, цифры, пробел и дефис.');
+      const m = ex ? { nick: n, traits: ex.traits || [], wish: ex.wish || '', ts: Date.now() } : { nick: n, traits: pickTraits(draft.traits), wish: wish || '', ts: Date.now() }; store.set('mine', JSON.stringify(m));
+      if (!ex && D.intake?.url) { try { await fetch(D.intake.url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ v: 1, nick: m.nick, traits: m.traits, wish: m.wish, ts: m.ts }) }); } catch {} }
+      showTab('me'); };
+  }
+  $('copyOath')?.addEventListener('click', async ev => { const m = mine(); try { await navigator.clipboard.writeText(`Присягаю! Мой ник: @${m.nick}. Характер: ${traitLine(m.traits)}.${m.wish ? ` Мечтаю стать: ${m.wish}.` : ''}`); ev.target.textContent = 'Скопировано — вставь в комментарии'; } catch { ev.target.textContent = 'Не вышло скопировать'; } });
+  $('recheck')?.addEventListener('click', async () => { try { D = await loadData(); } catch {} showTab('me'); });
+  $('cancelMine')?.addEventListener('click', e => { e.preventDefault(); store.set('mine', ''); followAgent = null; showTab('me'); });
+  const m = mine(), a = m && resOf(m.nick) && sim?.byNick(m.nick);
+  if (a && $('follow')) {
+    $('follow').onclick = ev => { if (followAgent === a) { followAgent = null; ev.target.textContent = 'Следить на карте'; } else { followAgent = a; flyTo(a.x, a.z, 14); togglePanel(false); ev.target.textContent = 'Не следить'; } };
+    $('story').onclick = () => storyImage({ ...resOf(m.nick), prof: sim.info(a).prof });
+    store.set('seen_' + m.nick, String(Date.now()));
+  }
+}
+setInterval(() => { const el = $('myLive'), m = mine(), a = el && m && sim?.byNick(m.nick); if (a && tab === 'me') { const st = $('panel').scrollTop; el.innerHTML = residentHtml(a); $('panel').scrollTop = st; } }, 2500);
 
 // картинка для сторис: снимок живого мира + паспорт
 async function storyImage(r) {
@@ -375,7 +441,9 @@ function wire() {
       $('copyLaw').onclick = async ev => { try { await navigator.clipboard.writeText('ЗАКОН: ' + ex); ev.target.textContent = 'Скопировано — вставь в комментарии ✓'; } catch { prompt('Скопируй и вставь в комментарии:', 'ЗАКОН: ' + ex); } };
     }; sel.onchange = run; run(); }
   const f = $('findForm');
-  if (f) { f.onsubmit = e => { e.preventDefault(); findMe($('nick').value); $('nick').blur(); }; const me = store.get('me'); if (me) { $('nick').value = me; findMe(me); } }
+  if (f) f.onsubmit = e => { e.preventDefault(); findMe($('nick').value); $('nick').blur(); };
+  document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => showTab(b.dataset.go));
+  wireMe();
 }
 
 // ---------- кнопки карты ----------
@@ -421,9 +489,10 @@ function residentHtml(a) {
       <div class="ranks" aria-label="Должность ${i.career.rankNo} из 10">${Array.from({ length: 10 }, (_, k) => `<i class="${k < i.career.rankNo ? 'on' : ''}"></i>`).join('')}</div>` : ''}
       <div class="hint" style="margin-top:4px">${esc(i.career.line)}${i.career.speed ? `<br>⚡ Работает на ${i.career.speed}% быстрее новичка` : ''}</div></div>
     <div class="box"><div class="lbl">ДЕНЬГИ</div><div class="hint" style="margin-top:4px">${esc(i.career.money || '')}</div></div>
+    ${i.goal ? `<div class="box"><div class="lbl">ПУТЬ К МЕЧТЕ · ${esc(i.goal.wish.toUpperCase())}</div><div class="dsteps">${i.goal.steps.map(x => `<div class="${x.done ? 'ok' : ''}"><i></i>${esc(x.t)}</div>`).join('')}</div><div class="hint">${esc(i.goal.text)}</div></div>` : ''}
     <div class="box"><div class="lbl">КОШЕЛЁК</div><div class="hint" style="margin-top:4px;font-size:15px;color:#2b1a0e"><b>💰 ${esc(i.coins)}</b>${i.hungry ? ' · <b style="color:#b5352a">не хватило на хлеб</b>' : ''}</div>
       <div class="hint">${esc(i.spend)}. Деньги даёт только работа.</div></div>
-    <div class="box"><div class="lbl">ЖИЗНЬ</div><div class="hint" style="margin-top:4px">🏠 ${esc(i.home)}<br>⭐ Мечта: ${esc(i.dream)}<br>📅 В поселении: ${i.days} ${plural(i.days, 'день', 'дня', 'дней')}</div></div>
+    <div class="box"><div class="lbl">ЖИЗНЬ</div><div class="hint" style="margin-top:4px">🏠 ${esc(i.home)}<br>${i.goal ? '🏠 Цель по жилью' : '⭐ Мечта'}: ${esc(i.dream)}<br>📅 В поселении: ${i.days} ${plural(i.days, 'день', 'дня', 'дней')}</div></div>
     <div class="box"><div class="lbl">ЛИЧНЫЙ ДНЕВНИК</div>${i.life.length ? i.life.map(diaryRow).join('') : '<div class="hint" style="margin-top:4px">Пока ничего особенного — всё ещё впереди.</div>'}</div>`;
 }
 function showResident(a) { shownResident = a; showInfo(residentHtml(a)); }
@@ -474,6 +543,9 @@ function liveText() {
 }
 setInterval(() => { const el = document.getElementById('liveNow'); if (el) el.textContent = liveText(); }, 1500);
 
+// плавный перелёт камеры к точке карты
+function flyTo(x, z, d) { const T = new THREE.Vector3(x, 0.5, z); flight = { t0: performance.now(), fromP: camera.position.clone(), fromT: controls.target.clone(), toT: T, toP: T.clone().add(new THREE.Vector3(0.4, 0.75, 0.55).setLength(d)) }; }
+
 // ---------- цикл ----------
 const clock = new THREE.Clock();
 let lastDt = 0.016, lastT = 0;
@@ -488,6 +560,7 @@ function loop(now) {
       if (avg > 0.045 && QUALITY.dpr > 0.75 && perf.checked < 3) { QUALITY.dpr = Math.max(0.75, QUALITY.dpr - 0.25); world.renderer.setPixelRatio(QUALITY.dpr); resize(); perf.checked++; } } }
   if (flight) { const k = Math.min(1, (performance.now() - flight.t0) / 1600), e = 1 - Math.pow(1 - k, 3);
     controls.target.lerpVectors(flight.fromT, flight.toT, e); camera.position.lerpVectors(flight.fromP, flight.toP, e); if (k >= 1) flight = null; }
+  else if (followAgent) { const k = 0.12, dx = (followAgent.x - controls.target.x) * k, dz = (followAgent.z - controls.target.z) * k; controls.target.x += dx; controls.target.z += dz; camera.position.x += dx; camera.position.z += dz; controls.autoRotate = false; }   // камера следит за своим жителем
   else if (!controls.autoRotate && performance.now() - world.idle() > 20000) controls.autoRotate = true;
   controls.update();
   // не даём уехать за край мира
@@ -516,7 +589,7 @@ setInterval(async () => {
     D = d; renderBar(); renderAlert(); buildPins(); if (tab) { const st = $('panel').scrollTop; const open = !$('panel').classList.contains('closed'); showTab(tab); $('panel').scrollTop = st; togglePanel(open); }
   } catch {}
 }, 300000);   // раз в 5 минут, а не раз в минуту
-window.__cam = () => camera; window.__fly = (x, z, d) => { const T = new THREE.Vector3(x, 0.5, z); flight = { t0: performance.now(), fromP: camera.position.clone(), fromT: controls.target.clone(), toT: T, toP: T.clone().add(new THREE.Vector3(0.4, 0.75, 0.55).setLength(d)) }; }; window.__sim = () => sim;
+window.__cam = () => camera; window.__fly = flyTo; window.__sim = () => sim;
 window.__dbg = () => ({ t: controls.target.toArray().map(v => +v.toFixed(2)), p: camera.position.toArray().map(v => +v.toFixed(1)) });
 loop();
 $('loading').style.opacity = 0; setTimeout(() => $('loading').remove(), 700);

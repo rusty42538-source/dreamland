@@ -42,9 +42,19 @@ export const TRAITS = {
   rebel:    { m: 'Бунтарь', f: 'Бунтарка', about: 'спорит с законами Думы и любит свободу' },
 };
 const TRAIT_KEYS = Object.keys(TRAITS), NAMED_TRAIT = ['kind', 'hard', 'merry', 'generous', 'sly', 'grump'];   // Гриша, Пахом, Тимоша, Марфа, Аркадий, Баба Нюра
-export const traitOf = i => i < 6 ? NAMED_TRAIT[i] : TRAIT_KEYS[Math.floor(hash(i + 61) * TRAIT_KEYS.length)];
-export const traitName = (i, fem) => TRAITS[traitOf(i)][fem ? 'f' : 'm'];
-export const talentOf = i => (0.8 + hash(i + 41) * 0.45) * (TRAITS[traitOf(i)].talent || 1);
+// Подписчик, создавший жителя, сам выбирает до двух характеров (data.json → residents[].traits). Несовместимые не сочетаются.
+export const CONFLICT = { hard: 'lazy', lazy: 'hard', generous: 'stingy', stingy: 'generous' };
+export const pickTraits = list => { const out = []; for (const k of list || []) { if (!TRAITS[k] || out.includes(k) || out.some(o => CONFLICT[o] === k)) continue; out.push(k); if (out.length === 2) break; } return out; };
+let OVER = new Map();
+export const setTraitOverrides = obj => { OVER = new Map(Object.entries(obj || {}).map(([i, t]) => [+i, pickTraits(t)]).filter(([, t]) => t.length)); };
+const baseTrait = i => i < 6 ? NAMED_TRAIT[i] : TRAIT_KEYS[Math.floor(hash(i + 61) * TRAIT_KEYS.length)];
+export const traitsOf = i => OVER.get(i) || [baseTrait(i)];
+export const traitOf = i => traitsOf(i)[0];
+export const traitName = (i, fem) => traitsOf(i).map((k, j) => j ? TRAITS[k][fem ? 'f' : 'm'].toLowerCase() : TRAITS[k][fem ? 'f' : 'm']).join(' и ');
+export const traitFx = i => { const L = traitsOf(i).map(k => TRAITS[k]);   // общее действие характеров на жизнь
+  return { talent: L.reduce((p, t) => p * (t.talent || 1), 1), work: L.reduce((q, t) => q + (t.work || 0), 0), taxK: L.reduce((p, t) => p * (t.taxK ?? 1), 1), buyK: L.reduce((p, t) => p * (t.buyK || 1), 1),
+    gift: L.some(t => t.gift), bizFirst: L.some(t => t.bizFirst), sly: traitsOf(i).includes('sly') }; };
+export const talentOf = i => (0.8 + hash(i + 41) * 0.45) * traitFx(i).talent;
 const needOf = r => 0.8 * Math.pow(1.35, r);            // дней опыта на один уровень: каждая следующая должность даётся на 35% дольше
 export function levelOf(xp) {
   let r = 0, left = xp;
@@ -60,23 +70,23 @@ export const PAYDAY = 18;                                               // за�
 // ---------- новые профессии: начинающие предприниматели открывают своё дело, когда на него появляется спрос ----------
 const L10 = (a, b, c, d, e, f, g, h, i, j) => [a, b, c, d, e, f, g, h, i, j];
 export const BIZ = {
-  potter: { name: 'гончар', shop: 'Гончарная', why: 'в новых домах нужна посуда', when: t => t.houses >= 1, color: '#c0704a',
+  potter: { name: 'гончар', shop: 'Гончарная', why: 'в новых домах нужна посуда', when: t => t.houses >= 1, needs: 'будет построен первый дом', color: '#c0704a',
     ranks: L10('Начинающий гончар', 'Гончар', 'Мастер-гончар', 'Хозяин гончарной', 'Гончар с подмастерьями', 'Хозяин двух гончарных', 'Мастер посуды', 'Главный мастер посуды', 'Хозяин гончарного двора', 'Владелец посудного завода') },
-  tailor: { name: 'портной', shop: 'Швейная', why: 'одежда износилась — нужна новая', when: t => t.day >= 4, color: '#8a5fb0',
+  tailor: { name: 'портной', shop: 'Швейная', why: 'одежда износилась — нужна новая', when: t => t.day >= 4, needs: 'пройдёт 4 дня', color: '#8a5fb0',
     ranks: L10('Начинающий портной', 'Портной', 'Мастер-портной', 'Хозяин швейной', 'Портной с подмастерьями', 'Хозяин двух швейных', 'Закройщик', 'Главный закройщик', 'Хозяин швейного двора', 'Владелец швейной фабрики') },
-  smith: { name: 'кузнец', shop: 'Кузница', why: 'у работников тупятся топоры и мотыги', when: t => t.workers >= 30, color: '#55504a',
+  smith: { name: 'кузнец', shop: 'Кузница', why: 'у работников тупятся топоры и мотыги', when: t => t.workers >= 30, needs: 'в государстве будет 30 работников', color: '#55504a',
     ranks: L10('Начинающий кузнец', 'Кузнец', 'Мастер-кузнец', 'Хозяин кузницы', 'Кузнец с подмастерьями', 'Хозяин двух кузниц', 'Оружейник', 'Главный оружейник', 'Хозяин кузнечного двора', 'Владелец кузнечного завода') },
-  mill: { name: 'мельник', shop: 'Мельница', why: 'зерна так много, что его пора молоть', when: t => t.grain >= 150, color: '#d9b25a',
+  mill: { name: 'мельник', shop: 'Мельница', why: 'зерна так много, что его пора молоть', when: t => t.grain >= 150, needs: 'накопится 150 мер зерна', color: '#d9b25a',
     ranks: L10('Начинающий мельник', 'Мельник', 'Мастер-мельник', 'Хозяин мельницы', 'Мельник с работниками', 'Хозяин двух мельниц', 'Мукомол', 'Главный мукомол', 'Хозяин мукомольни', 'Владелец мукомольного завода') },
-  smoke: { name: 'коптильщик', shop: 'Коптильня', why: 'рыбы больше, чем успевают съесть', when: t => t.fish >= 250, color: '#7a4a2a',
+  smoke: { name: 'коптильщик', shop: 'Коптильня', why: 'рыбы больше, чем успевают съесть', when: t => t.fish >= 250, needs: 'поймают 250 рыб', color: '#7a4a2a',
     ranks: L10('Начинающий коптильщик', 'Коптильщик', 'Мастер-коптильщик', 'Хозяин коптильни', 'Коптильщик с работниками', 'Хозяин двух коптилен', 'Рыботорговец', 'Старший рыботорговец', 'Хозяин рыбного двора', 'Владелец рыбного завода') },
-  joiner: { name: 'столяр', shop: 'Столярная', why: 'в новые дома нужна мебель', when: t => t.houses >= 3, color: '#a0703a',
+  joiner: { name: 'столяр', shop: 'Столярная', why: 'в новые дома нужна мебель', when: t => t.houses >= 3, needs: 'построят 3 дома', color: '#a0703a',
     ranks: L10('Начинающий столяр', 'Столяр', 'Мастер-столяр', 'Хозяин столярной', 'Столяр с подмастерьями', 'Хозяин двух столярных', 'Мебельщик', 'Главный мебельщик', 'Хозяин мебельного двора', 'Владелец мебельной фабрики') },
-  cobbler: { name: 'сапожник', shop: 'Сапожная', why: 'лапти стоптались — нужна обувь', when: t => t.day >= 9, color: '#6a4a3a',
+  cobbler: { name: 'сапожник', shop: 'Сапожная', why: 'лапти стоптались — нужна обувь', when: t => t.day >= 9, needs: 'пройдёт 9 дней', color: '#6a4a3a',
     ranks: L10('Начинающий сапожник', 'Сапожник', 'Мастер-сапожник', 'Хозяин сапожной', 'Сапожник с подмастерьями', 'Хозяин двух сапожных', 'Обувщик', 'Главный обувщик', 'Хозяин обувного двора', 'Владелец обувной фабрики') },
-  trader: { name: 'торговец', shop: 'Лавка', why: 'у жителей появились сбережения — им есть что купить', when: t => t.savings >= 3000, color: '#2f7a3a',
+  trader: { name: 'торговец', shop: 'Лавка', why: 'у жителей появились сбережения — им есть что купить', when: t => t.savings >= 3000, needs: 'у жителей накопится 3000 монет', color: '#2f7a3a',
     ranks: L10('Начинающий торговец', 'Лавочник', 'Опытный лавочник', 'Хозяин лавки', 'Торговец с приказчиками', 'Хозяин двух лавок', 'Купец', 'Купец второй гильдии', 'Купец первой гильдии', 'Владелец торгового дома') },
-  kvass: { name: 'квасовар', shop: 'Квасная', why: 'зерна в избытке — можно варить квас', when: t => t.grain >= 600, color: '#b5802a',
+  kvass: { name: 'квасовар', shop: 'Квасная', why: 'зерна в избытке — можно варить квас', when: t => t.grain >= 600, needs: 'накопится 600 мер зерна', color: '#b5802a',
     ranks: L10('Начинающий квасовар', 'Квасовар', 'Мастер-квасовар', 'Хозяин квасной', 'Квасовар с работниками', 'Хозяин двух квасных', 'Пивовар', 'Главный пивовар', 'Хозяин пивоварни', 'Владелец пивоваренного завода') },
 };
 // Чтобы открыть новое дело, нужно ПОСТРОИТЬ подходящее здание. Строит предприниматель из брёвен, которые покупает у лесорубов за свои деньги
@@ -89,7 +99,36 @@ export const BUILD = {   // сколько брёвен и рабочих дне
   cobbler: { logs: 4, days: 2, what: 'сапожную мастерскую' }, trader: { logs: 6, days: 3, what: 'торговую лавку с прилавком' },
   kvass: { logs: 5, days: 2, what: 'квасную с бочками' },
 };
+export const MAX_SHOPS = 16;     // столько зданий дел помещается на ярмарочной площади
 export const buildCost = key => BUILD[key].logs * LOG_PRICE;
+
+// ---------- желаемая профессия подписчика ----------
+// Рыбак и земледелец — сразу работа. Готовые дела (гончар, кузнец…) — путь: работа → копит монеты → ждёт спроса → строит здание.
+// Любая другая профессия — «своя»: житель строит мастерскую под это название (по одной на жителя).
+const WISH = [[/рыбак|рыбач|рыболов/, 'fish'], [/земледел|фермер|крестьян|агроном|пахар|огородник|хлебороб/, 'farm'], [/гонч|керамик|посуд/, 'potter'],
+  [/портн|швея|швей|одежд|модельер/, 'tailor'], [/кузнец|кузн|оружейн|слесар/, 'smith'], [/мельник|мельниц|мукомол/, 'mill'], [/коптил|копчен|рыботорг/, 'smoke'],
+  [/столяр|мебел|краснодерев/, 'joiner'], [/сапожн|обув/, 'cobbler'], [/торгов|купец|лавоч|продав|предпринимат|бизнесмен/, 'trader'], [/квас|пивовар/, 'kvass']];
+export const cleanWish = text => { const w = String(text || '').trim().replace(/\s+/g, ' '); return /^[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9 \-]{1,23}$/.test(w) ? w[0].toUpperCase() + w.slice(1) : null; };
+export function describeWish(text) {
+  const w = cleanWish(text); if (!w) return null;
+  const low = w.toLowerCase().replace(/ё/g, 'е'), hit = WISH.find(([re]) => re.test(low));
+  if (hit) return hit[1] === 'fish' || hit[1] === 'farm' ? { wish: w, key: hit[1], kind: 'job' } : { wish: w, key: hit[1], kind: 'known', price: buildCost(hit[1]), need: BIZ[hit[1]].needs, what: BUILD[hit[1]].what };
+  return { wish: w, key: null, kind: 'custom', price: 5 * LOG_PRICE, need: 'пройдёт не меньше 6 дней', what: `мастерскую «${w}»` };
+}
+const CUSTOM_COLORS = ['#c0704a', '#8a5fb0', '#2f7a9a', '#b5802a', '#7a8a3a', '#a05050', '#4f7a5a', '#d08a3a'];
+const customRanks = x => ['новичок', 'ученик', 'подмастерье', 'мастер', 'старший мастер', 'главный мастер', 'глава мастерской', 'глава двух мастерских', 'управляющий делом', 'владелец производства'].map(r => `${x} · ${r}`);
+const GOALS = new Map(), CUSTOM = new Set();
+// map: номер жителя на карте → желаемая профессия (текст). Вызывается при запуске мира.
+export function setGoals(map) {
+  for (const k of CUSTOM) { delete BIZ[k]; delete BUILD[k]; } CUSTOM.clear(); GOALS.clear();
+  for (const [i, text] of Object.entries(map || {})) { const g = describeWish(text); if (!g) continue; const idx = +i;
+    if (g.kind === 'known' && [...GOALS.values()].some(o => o.key === g.key)) { g.kind = 'custom'; g.key = null; }   // готовое дело одно: следующий желающий строит личную мастерскую
+    if (g.kind === 'custom') { const key = 'u' + idx; g.key = key; CUSTOM.add(key);
+      BIZ[key] = { name: g.wish.toLowerCase(), shop: `Мастерская «${g.wish}»`, why: 'это мечта хозяина', when: t => t.day >= 6, needs: 'пройдёт не меньше 6 дней', color: CUSTOM_COLORS[idx % CUSTOM_COLORS.length], ranks: customRanks(g.wish), only: idx, custom: true };
+      BUILD[key] = { logs: 5, days: 2, what: `мастерскую «${g.wish}»` }; }
+    GOALS.set(idx, g); }
+}
+export const goalOf = i => GOALS.get(i) || null;
 // Лекарь (Баба Нюра) здания не строит: ходит к больным и лечит дома. Государство может построить лечебницу — тогда лечит там и принимает больше людей.
 const P_SICK = 0.04, HEAL_FEE = 3, HEAL_CAP = 5, CLINIC_CAP = 20;
 const BUY = 0.4, BUY_FROM = 15;    // кто богаче 15 монет, тратит в среднем 0,4 монеты в день в каждой мастерской
@@ -110,7 +149,7 @@ export function logsUntil(day, hour) {
 
 // spec: [{ i, role, join }] — role: стартовая работа ('walk' — без работы), join — день прихода в государство
 export function createLife(spec, tax, houseCost, clinicFrom = Infinity) {
-  const n = spec.length;                        // история считается один раз и продвигается день за днём на месте (без копий всего журнала)
+  const n = spec.length, FX = spec.map(s => traitFx(s.i));       // история считается один раз и продвигается день за днём на месте (без копий всего журнала)
   const init = () => ({ role: spec.map(s => s.role), xp: new Float64Array(n), coins: Float64Array.from(spec, s => 20 + Math.round(hash(s.i + 51) * 20)),
     earned: new Float64Array(n), pay: new Float64Array(n), hungry: new Uint8Array(n), hiredDay: new Int32Array(n).fill(-1), paid: 0,
     bk: new Uint8Array(n), sick: new Uint8Array(n), shopLogs: 0, sickToday: 0, healedToday: 0, treasury: 0, logs: 0, fish: 0, grain: 0, houses: 0, hires: [], promos: [], biz: [], log: [] });
@@ -127,14 +166,19 @@ export function createLife(spec, tax, houseCost, clinicFrom = Infinity) {
       // 1) построенное здание готово — хозяин открывает дело
       for (const b of s.biz) if (b.state === 'build' && d >= b.ready) { b.state = 'open'; s.role[b.k] = b.key; s.xp[b.k] = 0; s.bk[b.k] = 0; s.log.push({ d, h: MORNING, t: 'biz', k: b.k, key: b.key }); }
       // 2) появился спрос — самый богатый из простых работников покупает брёвна и начинает стройку (одна стройка за раз)
-      if (s.biz.length < Object.keys(BIZ).length && !s.biz.some(b => b.state === 'build')) {   // все дела уже есть — спрос не проверяем
-        const t = { day: d, grain: s.grain, fish: s.fish, houses: s.houses, workers: s.role.filter((r, k) => r !== 'walk' && d >= spec[k].join).length, savings: s.coins.reduce((a, b) => a + b, 0) };
+      const t = { day: d, grain: s.grain, fish: s.fish, houses: s.houses, workers: s.role.filter((r, k) => r !== 'walk' && d >= spec[k].join).length, savings: s.coins.reduce((a, b) => a + b, 0) };
+      s.demand = t;     // что сейчас происходит в государстве — по этому условию дела открываются (и показываются в «пути к мечте»)
+      if (s.biz.length < Math.min(MAX_SHOPS, Object.keys(BIZ).length) && !s.biz.some(b => b.state === 'build')) {   // все дела уже есть — спрос не проверяем
         const stock = s.logs * (1 - tax) - s.shopLogs - s.houses * houseCost;     // свободные брёвна на складе (после домов и прошлых строек)
-        const score = k => s.coins[k] * (TRAITS[traitOf(spec[k].i)].bizFirst ? 2 : 1);   // мечтатели берутся за новое дело первыми
+        const score = k => s.coins[k] * (FX[k].bizFirst ? 2 : 1);   // мечтатели берутся за новое дело первыми
         for (const key of Object.keys(BIZ)) {
           if (s.biz.some(x => x.key === key) || !BIZ[key].when(t) || stock < BUILD[key].logs) continue;
-          const price = buildCost(key); let best = -1;
-          for (let k = 0; k < n; k++) if (d >= spec[k].join && free(s.role[k]) && !s.bk[k] && s.coins[k] >= price + RESERVE && (best < 0 || score(k) > score(best))) best = k;
+          const price = buildCost(key), only = BIZ[key].only; let best = -1;
+          const ok = k => d >= spec[k].join && free(s.role[k]) && !s.bk[k] && s.coins[k] >= price + RESERVE && (only == null || spec[k].i === only) && (!goalOf(spec[k].i) || goalOf(spec[k].i).key === key);   // у кого своя мечта — тот строит только её   // личное дело открывает только его хозяин
+          const dreamers = []; for (let k = 0; k < n; k++) if (goalOf(spec[k].i)?.key === key && d >= spec[k].join) dreamers.push(k);
+          if (only == null && dreamers.length) {        // у дела есть «хозяин мечты»: даём ему месяц накопить, потом дело может открыть любой желающий
+            const mine = dreamers.filter(ok); if (mine.length) best = mine.reduce((a, b) => score(a) >= score(b) ? a : b); else if (dreamers.some(k => d < spec[k].join + 30)) continue; }
+          if (best < 0) for (let k = 0; k < n; k++) if (ok(k) && (best < 0 || score(k) > score(best))) best = k;
           if (best < 0) continue;
           s.coins[best] -= price; s.shopLogs += BUILD[key].logs; s.bk[best] = 1;
           const sellers = WOODCUTTERS.filter(i => i < n); sellers.forEach(i => { s.coins[i] += price / sellers.length; s.earned[i] += price / sellers.length; });   // деньги получают лесорубы
@@ -152,6 +196,7 @@ export function createLife(spec, tax, houseCost, clinicFrom = Infinity) {
     for (const b of s.biz) b.p = b.state === 'open' ? 1 : Math.min(0.99, ((d - b.d) + clamp((h - MORNING) / (24 - MORNING), 0, 1)) / BUILD[b.key].days);
     for (let k = 0; k < n; k++) {
       if (d < spec[k].join) continue;
+      if (d === spec[k].join && spec[k].wish && h >= MORNING) s.log.push({ d, h: MORNING, t: 'oath', k });   // присяга: житель пришёл с мечтой о профессии
       // утро: денег мало — идёт устраиваться на работу
       if (s.role[k] === 'walk' && s.coins[k] < HIRE_BELOW && h >= MORNING) {
         const r = cnt.farm < CAP.farm ? 'farm' : cnt.fish < CAP.fish ? 'fish' : 'farm'; s.role[k] = r; cnt[r]++; s.hiredDay[k] = d; s.hires.push({ d, k, r }); s.log.push({ d, h: MORNING + (k % 7) * 0.05, t: 'hire', k, r });
@@ -160,7 +205,7 @@ export function createLife(spec, tax, houseCost, clinicFrom = Infinity) {
       const r = s.role[k], wk = s.bk[k] ? 0 : s.sick[k] === 1 ? 0 : s.sick[k] === 2 ? 0.5 : 1;   // стройка и болезнь отнимают рабочее время
       if (r !== 'walk') {
         const L0 = levelOf(s.xp[k]), m = multOf(L0) * wk;
-        if (payday && WAGE[r] && wk) { const pay = WAGE[r] * payMultOf(L0) * wk, t = pay * tax * (TRAITS[traitOf(spec[k].i)].taxK ?? 1); s.coins[k] += pay - t; s.earned[k] += pay - t; s.pay[k] = pay - t; s.treasury += t; }
+        if (payday && WAGE[r] && wk) { const pay = WAGE[r] * payMultOf(L0) * wk, t = pay * tax * FX[k].taxK; s.coins[k] += pay - t; s.earned[k] += pay - t; s.pay[k] = pay - t; s.treasury += t; }
         const gain = talentOf(spec[k].i) * f * wk * (s.hungry[k] ? 0.6 : 1), x0 = s.xp[k]; s.xp[k] += gain;
         const L1 = levelOf(s.xp[k]); if (L1.rank > L0.rank) { let lo = 0, hi = 1; for (let it = 0; it < 24; it++) { const mid = (lo + hi) / 2; if (levelOf(x0 + gain * mid).rank > L0.rank) hi = mid; else lo = mid; }
           s.promos.push({ d, k, rank: L1.rank }); s.log.push({ d, h: Math.round(hi * h * 100) / 100, t: 'promo', k, role: r, rank: L1.rank }); }   // опыт копится равномерно с 0:00 до h — значит, повышение было в hi·h часов
@@ -170,13 +215,13 @@ export function createLife(spec, tax, houseCost, clinicFrom = Infinity) {
     // вечером жители покупают товары в мастерских — это и есть доход предпринимателей
     if (payday && s.biz.length) for (const b of s.biz) { if (b.state !== 'open') continue;
       let sum = 0; const q = 1 + 0.1 * levelOf(s.xp[b.k]).rank;   // чем опытнее хозяин, тем лучше товар и тем больше покупают
-      for (let k = 0; k < n; k++) if (k !== b.k && d >= spec[k].join && s.coins[k] >= BUY_FROM) { const x = BUY * q * (TRAITS[traitOf(spec[k].i)].buyK || 1); s.coins[k] -= x; sum += x; }
+      for (let k = 0; k < n; k++) if (k !== b.k && d >= spec[k].join && s.coins[k] >= BUY_FROM) { const x = BUY * q * FX[k].buyK; s.coins[k] -= x; sum += x; }
       const t = sum * tax; s.coins[b.k] += sum - t; s.earned[b.k] += sum - t; s.pay[b.k] = sum - t; s.treasury += t; b.sold = Math.round(sum / 2);
     }
     // за ужином добряки и щедрые угощают тех, кому сегодня не хватило на хлеб
     if (h >= 19.5) { const hungry = []; for (let k = 0; k < n; k++) if (s.hungry[k] && d >= spec[k].join) hungry.push(k);
-      for (let k = 0; k < n && hungry.length; k++) if (TRAITS[traitOf(spec[k].i)].gift && d >= spec[k].join && s.coins[k] >= 40) { const to = hungry.shift(); s.coins[k] -= 6; s.coins[to] += 6; s.log.push({ d, h: 19.5, t: 'gift', k, to }); } }
-    if (tax && payday && d % 4 === 2) for (let k = 0; k < n; k++) if (traitOf(spec[k].i) === 'sly' && s.role[k] !== 'walk' && d >= spec[k].join) { s.log.push({ d, h: PAYDAY, t: 'sly', k }); break; }
+      for (let k = 0; k < n && hungry.length; k++) if (FX[k].gift && d >= spec[k].join && s.coins[k] >= 40) { const to = hungry.shift(); s.coins[k] -= 6; s.coins[to] += 6; s.log.push({ d, h: 19.5, t: 'gift', k, to }); } }
+    if (tax && payday && d % 4 === 2) for (let k = 0; k < n; k++) if (FX[k].sly && s.role[k] !== 'walk' && d >= spec[k].join) { s.log.push({ d, h: PAYDAY, t: 'sly', k }); break; }
     if ((d + 1) % 6 === 0 && h >= 12) s.log.push({ d, h: 12, t: 'harvest', grain: Math.round(s.grain) });
     { const nh = Math.floor((s.logs * (1 - tax) - s.shopLogs) / houseCost); while (s.houses < nh) { s.houses++; const need = (s.houses * houseCost + s.shopLogs) / (1 - tax); s.log.push({ d, h: Math.round(h * clamp((need - logs0) / Math.max(1e-6, s.logs - logs0), 0, 1) * 100) / 100, t: 'house', n: s.houses }); } }
     if (rent) for (let k = 0; k < n; k++) if (d >= spec[k].join) { const b = Math.min(BED, s.coins[k]); s.coins[k] -= b; s.treasury += b; }

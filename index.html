@@ -100,11 +100,14 @@ select,input{width:100%;font:700 15px var(--body);padding:11px 12px;border-radiu
 .dice{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
 .dice div{background:rgba(43,26,14,.06);border-radius:10px;padding:8px 6px;font:700 11px/1.3 var(--body);text-align:center}
 .dice b{display:block;font:900 13px var(--body)}
-.passport{border-radius:18px;padding:16px;background:linear-gradient(160deg,#fbf2dd,#e9cf98);border:6px double #8a5f36;margin-top:12px}
-.passport .k{font:900 11px var(--body);letter-spacing:.18em;color:#8a2f24}
-.passport .num{font:30px var(--disp);color:#5a1f16;margin:6px 0}
-.passport .f{display:flex;justify-content:space-between;gap:10px;border-top:2px dashed rgba(90,52,22,.25);padding:7px 0;font:800 14px var(--body)}
-.passport .f span{color:#8a5f36;font-weight:700}
+
+.traits{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.tr{flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:3px;text-align:left;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.7);color:#2b1a0e;border:2px solid rgba(90,52,22,.18);font:800 15px var(--body)}
+.tr small{font:600 11.5px/1.3 var(--body);color:#6b4424}.tr.on{background:#2b1a0e;color:#ffe9b8;border-color:#e2b23a}.tr.on small{color:#e8d4a8}.tr:disabled{opacity:.38;cursor:default}
+.row2{display:flex;gap:8px;margin-top:10px}.row2 button{flex:1}.digest{border-color:rgba(226,178,58,.7);background:rgba(255,248,225,.8)}
+.box[data-go]{cursor:pointer}
+.chips span[data-w]{padding:6px 12px;border-radius:20px;background:rgba(255,255,255,.75);border:1px solid rgba(90,52,22,.22);font:700 12.5px var(--body);color:#2b1a0e;cursor:pointer}
+.dsteps{margin-top:6px}.dsteps div{display:flex;gap:9px;align-items:flex-start;padding:5px 0;font:700 13px/1.3 var(--body);color:#2b1a0e}.dsteps i{flex:none;width:16px;height:16px;margin-top:1px;border-radius:50%;border:2px solid #b9a07a}.dsteps .ok i{background:#2f7a3a;border-color:#2f7a3a}.dsteps .ok{color:#2f7a3a}
 .welcome{background:#2b1a0e;color:var(--ink);border-radius:16px;padding:14px;margin-top:4px;font:600 14px/1.5 var(--body)}
 .welcome b{color:var(--gold2)}
 .empty{font:600 14px/1.45 var(--body);color:var(--brown2)}
@@ -145,7 +148,7 @@ select,input{width:100%;font:700 15px var(--body);padding:11px 12px;border-radiu
   <button role="tab" data-tab="state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6"/></svg>Государство</button>
   <button role="tab" data-tab="laws"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7M9 7h3"/></svg>Законы</button>
   <button role="tab" data-tab="deputies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3"/></svg>Депутаты</button>
-  <button role="tab" data-tab="me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M8 17c1-2 7-2 8 0"/></svg>Паспорт</button>
+  <button role="tab" data-tab="me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M8 17c1-2 7-2 8 0"/></svg>Мой житель</button>
 </nav>
 <div class="loading" id="loading">Государство загружается…</div>
 <script>
