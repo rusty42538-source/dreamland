@@ -468,22 +468,27 @@ export function createSim(world, D) {
       if (!a.rod) { a.rod = new THREE.Mesh(rodGeo, rodMat); a.rod.visible = false; scene.add(a.rod); } });
   }
 
+  const claimer = () => { const taken = [];       // каждому жителю — своё место: никто не стоит в одной точке с другим
+    return (x, z) => { for (let t = 0; t < 90; t++) { const ang = t * 2.4, r = t ? 0.7 * Math.sqrt(t) : 0, p = freeNear(x + Math.cos(ang) * r, z + Math.sin(ang) * r);
+        if (taken.every(q => Math.hypot(q[0] - p[0], q[1] - p[1]) >= 0.8)) { taken.push(p); return p; } }
+      const p = freeNear(x, z); taken.push(p); return p; }; };
   function placeFixedSpots() {
+    const claimHome = claimer(), claimDinner = claimer();
     const owners = agents.filter(a => a.house && a.house.done), lodgers = agents.filter(a => !(a.house && a.house.done));
     const inHuts = Math.max(0, pop - lastEco.done);                         // жители без своего дома
     hutOcc = huts.map((_, h) => clamp(inHuts - h * HUT_CAPACITY, 0, HUT_CAPACITY));
     const filled = hutOcc.filter(v => v > 0).length || 1;
     lodgers.forEach((a, k) => { const h = Math.min(filled - 1, Math.floor(k * filled / Math.max(1, lodgers.length))); a.hutNo = h;
-      const hh = huts[h] || { x: CAMP.x + 3, z: CAMP.y }; a.hut = freeNear(...hutDoor(hh)); });
-    owners.forEach(a => { a.hutNo = null; a.hut = freeNear(...hutDoor(huts[0] || { x: CAMP.x + 3, z: CAMP.y })); });
-    agents.forEach(a => { if (a.house) a.house.door = freeNear(a.house.x, a.house.z); });
+      const hh = huts[h] || { x: CAMP.x + 3, z: CAMP.y }; a.hut = claimHome(...hutDoor(hh)); });
+    owners.forEach(a => { a.hutNo = null; a.hut = claimHome(...hutDoor(huts[0] || { x: CAMP.x + 3, z: CAMP.y })); });
+    agents.forEach(a => { if (a.house) a.house.door = claimHome(a.house.x, a.house.z); });
     woodcutters.forEach((a, k) => a.pileSpot = freeNear(pile.x + Math.sin(k * 2.4) * 1.5, pile.z + Math.cos(k * 2.4) * 1.5));
     assignFish();
     if (clinic) { const dir = Math.atan2(CAMP.x - clinic.x, CAMP.y - clinic.z);       // места перед лечебницей: у входа — лекарь, по дуге — больные
       clinic.heal = freeNear(clinic.x + Math.sin(dir) * 2.6, clinic.z + Math.cos(dir) * 2.6);
       clinic.spots = Array.from({ length: 14 }, (_, k) => { const a = dir + (k / 13 - 0.5) * 2.2; return freeNear(clinic.x + Math.sin(a) * 3.9, clinic.z + Math.cos(a) * 3.9); }); }
     shops.forEach(st => { st.front = freeNear(st.x + Math.sin(st.rot) * 2.4, st.z + Math.cos(st.rot) * 2.4); });
-    agents.forEach(a => { const ang = hash(a.i + 31) * 6.283, r = 4.6 + hash(a.i + 33) * 3.2; a.dinner = freeNear(CAMP.x + Math.cos(ang) * r, CAMP.y + Math.sin(ang) * r * 0.9); });
+    agents.forEach(a => { const ang = hash(a.i + 31) * 6.283, r = 4.6 + hash(a.i + 33) * 3.2; a.dinner = claimDinner(CAMP.x + Math.cos(ang) * r, CAMP.y + Math.sin(ang) * r * 0.9); });
   }
 
   // ---------- инстансы: тела, руки, кисти, тени, брёвна ----------
